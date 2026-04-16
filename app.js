@@ -9,6 +9,8 @@ const state = {
     service: 0,
     discount: 0,
     total: 0,
+    calculationMode: 'ai_steps',
+    calculationSteps: [],
   },
   items: [],
 };
@@ -27,6 +29,8 @@ const el = {
   serviceInput: $('serviceInput'),
   discountInput: $('discountInput'),
   totalInput: $('totalInput'),
+  calculationModeSelect: $('calculationModeSelect'),
+  calcStepsHint: $('calcStepsHint'),
   personInput: $('personInput'),
   addPersonBtn: $('addPersonBtn'),
   peopleChips: $('peopleChips'),
@@ -52,7 +56,11 @@ const el = {
 };
 
 function formatRp(value) {
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(value || 0));
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
 }
 
 function uid() {
@@ -60,6 +68,11 @@ function uid() {
 }
 
 function sanitizeNumber(v) {
+  if (typeof v === 'string') {
+    const cleaned = v.replace(/[^\d.-]/g, '');
+    const n = Number(cleaned || 0);
+    return Number.isFinite(n) ? n : 0;
+  }
   const n = Number(v || 0);
   return Number.isFinite(n) ? n : 0;
 }
@@ -79,6 +92,71 @@ function normalizeItem(raw = {}) {
   };
 }
 
+function normalizeStep(raw = {}) {
+  const type = String(raw.type || 'adjustment').toLowerCase();
+  let amount = sanitizeNumber(raw.amount);
+  if (type === 'discount' && amount > 0) amount *= -1;
+  return {
+    id: raw.id || uid(),
+    type,
+    label: raw.label || defaultStepLabel(type),
+    amount,
+  };
+}
+
+function defaultStepLabel(type) {
+  switch (type) {
+    case 'discount': return 'Discount';
+    case 'tax': return 'Tax';
+    case 'service': return 'Service';
+    case 'adjustment': return 'Adjustment';
+    default: return 'Biaya';
+  }
+}
+
+function buildPresetSteps(mode) {
+  const discountAmount = -Math.abs(sanitizeNumber(state.receipt.discount));
+  const taxAmount = sanitizeNumber(state.receipt.tax);
+  const serviceAmount = sanitizeNumber(state.receipt.service);
+  const buckets = {
+    discount: discountAmount ? [{ type: 'discount', label: 'Discount', amount: discountAmount }] : [],
+    tax: taxAmount ? [{ type: 'tax', label: 'Tax', amount: taxAmount }] : [],
+    service: serviceAmount ? [{ type: 'service', label: 'Service', amount: serviceAmount }] : [],
+  };
+
+  const orders = {
+    subtotal_discount_tax_service: ['discount', 'tax', 'service'],
+    subtotal_discount_service_tax: ['discount', 'service', 'tax'],
+    subtotal_tax_service_discount: ['tax', 'service', 'discount'],
+    subtotal_tax_discount_service: ['tax', 'discount', 'service'],
+    subtotal_service_discount_tax: ['service', 'discount', 'tax'],
+    subtotal_service_tax_discount: ['service', 'tax', 'discount'],
+  };
+
+  const order = orders[mode] || ['discount', 'tax', 'service'];
+  return order.flatMap((key) => buckets[key]).map(normalizeStep);
+}
+
+function getEffectiveSteps() {
+  if (state.receipt.calculationMode === 'ai_steps' && state.receipt.calculationSteps?.length) {
+    return state.receipt.calculationSteps.map(normalizeStep);
+  }
+  return buildPresetSteps(state.receipt.calculationMode);
+}
+
+function describeCalculationMode() {
+  const map = {
+    ai_steps: 'Mengikuti urutan perhitungan yang dibaca AI dari nota.',
+    subtotal_discount_tax_service: 'Subtotal item → discount → tax → service',
+    subtotal_discount_service_tax: 'Subtotal item → discount → service → tax',
+    subtotal_tax_service_discount: 'Subtotal item → tax → service → discount',
+    subtotal_tax_discount_service: 'Subtotal item → tax → discount → service',
+    subtotal_service_discount_tax: 'Subtotal item → service → discount → tax',
+    subtotal_service_tax_discount: 'Subtotal item → service → tax → discount',
+  };
+  return map[state.receipt.calculationMode] || map.ai_steps;
+}
+
 function splitItemByQty(itemId) {
   const idx = state.items.findIndex((it) => it.id === itemId);
   if (idx === -1) return;
@@ -86,13 +164,14 @@ function splitItemByQty(itemId) {
   const qty = Math.max(1, sanitizeNumber(item.qty));
   if (qty <= 1) return;
   const unit = unitPrice(item);
+  const remainder = sanitizeNumber(item.price) - (unit * qty);
   const newItems = [];
   for (let i = 0; i < qty; i++) {
     newItems.push({
       id: uid(),
       name: `${item.name} ${qty > 1 ? `#${i + 1}` : ''}`.trim(),
       qty: 1,
-      price: unit,
+      price: unit + (i === qty - 1 ? remainder : 0),
       assignedTo: i === 0 ? [...item.assignedTo] : [],
     });
   }
@@ -110,12 +189,13 @@ function splitAllQtyItems() {
       return;
     }
     const unit = unitPrice(item);
+    const remainder = sanitizeNumber(item.price) - (unit * qty);
     for (let i = 0; i < qty; i++) {
       state.items.push({
         id: uid(),
         name: `${item.name} #${i + 1}`,
         qty: 1,
-        price: unit,
+        price: unit + (i === qty - 1 ? remainder : 0),
         assignedTo: i === 0 ? [...item.assignedTo] : [],
       });
     }
@@ -155,8 +235,10 @@ async function scanReceipt() {
     state.receipt.subtotal = sanitizeNumber(data.receipt?.subtotal);
     state.receipt.tax = sanitizeNumber(data.receipt?.tax);
     state.receipt.service = sanitizeNumber(data.receipt?.service);
-    state.receipt.discount = sanitizeNumber(data.receipt?.discount);
+    state.receipt.discount = Math.abs(sanitizeNumber(data.receipt?.discount));
     state.receipt.total = sanitizeNumber(data.receipt?.total);
+    state.receipt.calculationMode = data.receipt?.calculation_steps?.length ? 'ai_steps' : 'subtotal_discount_tax_service';
+    state.receipt.calculationSteps = (data.receipt?.calculation_steps || []).map(normalizeStep);
     state.items = (data.receipt?.items || []).map((it) => normalizeItem(it));
     el.scanStatus.textContent = 'Scan selesai. Silakan cek dan edit hasilnya kalau perlu.';
     render();
@@ -199,13 +281,37 @@ function updateReceiptFieldsFromInputs() {
   state.receipt.subtotal = sanitizeNumber(el.subtotalInput.value);
   state.receipt.tax = sanitizeNumber(el.taxInput.value);
   state.receipt.service = sanitizeNumber(el.serviceInput.value);
-  state.receipt.discount = sanitizeNumber(el.discountInput.value);
+  state.receipt.discount = Math.abs(sanitizeNumber(el.discountInput.value));
   state.receipt.total = sanitizeNumber(el.totalInput.value);
+  state.receipt.calculationMode = el.calculationModeSelect.value;
   render(false);
 }
 
+function distributeAmount(rows, amount) {
+  const sign = amount >= 0 ? 1 : -1;
+  const candidates = rows.filter((row) => row.running > 0);
+  const baseRows = candidates.length ? candidates : rows;
+  const baseTotal = baseRows.reduce((sum, row) => sum + Math.max(0, row.running), 0);
+
+  if (!baseRows.length) return;
+
+  if (baseTotal <= 0) {
+    const each = amount / baseRows.length;
+    baseRows.forEach((row) => { row.running += each; });
+    return;
+  }
+
+  let allocated = 0;
+  baseRows.forEach((row, index) => {
+    const base = Math.max(0, row.running);
+    let share = index === baseRows.length - 1 ? amount - allocated : Math.round((amount * base) / baseTotal);
+    allocated += share;
+    row.running += share;
+  });
+}
+
 function calculate() {
-  const peopleItemTotals = Object.fromEntries(state.people.map((p) => [p, 0]));
+  const peopleBaseTotals = Object.fromEntries(state.people.map((p) => [p, 0]));
   const itemGrand = state.items.reduce((sum, item) => sum + sanitizeNumber(item.price), 0);
 
   state.items.forEach((item) => {
@@ -213,64 +319,105 @@ function calculate() {
     if (!eaters.length) return;
     const each = sanitizeNumber(item.price) / eaters.length;
     eaters.forEach((name) => {
-      if (!(name in peopleItemTotals)) peopleItemTotals[name] = 0;
-      peopleItemTotals[name] += each;
+      if (!(name in peopleBaseTotals)) peopleBaseTotals[name] = 0;
+      peopleBaseTotals[name] += each;
     });
   });
 
-  const fees = sanitizeNumber(state.receipt.tax) + sanitizeNumber(state.receipt.service);
-  const feeEach = state.people.length ? fees / state.people.length : 0;
+  const rows = state.people.map((name) => ({
+    name,
+    itemsOnly: peopleBaseTotals[name] || 0,
+    running: peopleBaseTotals[name] || 0,
+    steps: [],
+  }));
 
-  const explicitDiscount = sanitizeNumber(state.receipt.discount);
-  const derivedAdjustment = sanitizeNumber(state.receipt.total) - (itemGrand + fees - explicitDiscount);
-  const totalDiscountOrAdjustment = explicitDiscount - derivedAdjustment;
-
-  const totalAssignedItems = Object.values(peopleItemTotals).reduce((a, b) => a + b, 0);
-
-  const rows = state.people.map((name) => {
-    const itemsOnly = peopleItemTotals[name] || 0;
-    const discountShare = totalAssignedItems > 0
-      ? (itemsOnly / totalAssignedItems) * totalDiscountOrAdjustment
-      : (state.people.length ? totalDiscountOrAdjustment / state.people.length : 0);
-    const total = itemsOnly + feeEach - discountShare;
-    return {
-      name,
-      itemsOnly,
-      fees: feeEach,
-      adjustment: -discountShare,
-      total,
-    };
+  const effectiveSteps = getEffectiveSteps();
+  effectiveSteps.forEach((step) => {
+    const before = rows.map((row) => row.running);
+    distributeAmount(rows, sanitizeNumber(step.amount));
+    rows.forEach((row, index) => {
+      const delta = row.running - before[index];
+      if (Math.abs(delta) > 0.0001) {
+        row.steps.push({
+          type: step.type,
+          label: step.label,
+          amount: delta,
+        });
+      }
+    });
   });
 
-  const computedGrand = rows.reduce((sum, row) => sum + row.total, 0);
-  const targetGrand = sanitizeNumber(state.receipt.total) || (itemGrand + fees - explicitDiscount);
+  let computedGrand = rows.reduce((sum, row) => sum + row.running, 0);
+  const targetGrand = sanitizeNumber(state.receipt.total) || (itemGrand + effectiveSteps.reduce((s, step) => s + step.amount, 0));
   const reconciliation = targetGrand - computedGrand;
   if (rows.length && Math.abs(reconciliation) > 0.0001) {
-    rows[rows.length - 1].total += reconciliation;
-    rows[rows.length - 1].adjustment += reconciliation;
+    rows[rows.length - 1].running += reconciliation;
+    rows[rows.length - 1].steps.push({ type: 'adjustment', label: 'Rounding', amount: reconciliation });
+    computedGrand += reconciliation;
   }
 
+  const totalsByType = { tax: 0, service: 0, discount: 0, adjustment: 0 };
+  effectiveSteps.forEach((step) => {
+    if (!(step.type in totalsByType)) totalsByType[step.type] = 0;
+    totalsByType[step.type] += step.amount;
+  });
+  if (Math.abs(reconciliation) > 0.0001) totalsByType.adjustment += reconciliation;
+
   return {
-    rows,
+    rows: rows.map((row) => ({
+      name: row.name,
+      itemsOnly: row.itemsOnly,
+      total: row.running,
+      stepSummary: summarizeRowSteps(row.steps),
+      steps: row.steps,
+    })),
     itemGrand,
-    fees,
-    adjustment: totalDiscountOrAdjustment * -1,
+    fees: (totalsByType.tax || 0) + (totalsByType.service || 0),
+    adjustment: (totalsByType.discount || 0) + (totalsByType.adjustment || 0),
     grand: targetGrand,
+    effectiveSteps,
+    computedGrand,
   };
+}
+
+function summarizeRowSteps(steps) {
+  const summary = { discount: 0, tax: 0, service: 0, adjustment: 0, other: 0 };
+  steps.forEach((step) => {
+    if (step.type in summary) summary[step.type] += step.amount;
+    else summary.other += step.amount;
+  });
+  return summary;
+}
+
+function formatStepSummary(summary) {
+  const parts = [];
+  if (summary.discount) parts.push(`disc ${formatSigned(summary.discount)}`);
+  if (summary.tax) parts.push(`tax ${formatSigned(summary.tax)}`);
+  if (summary.service) parts.push(`service ${formatSigned(summary.service)}`);
+  if (summary.adjustment || summary.other) parts.push(`adj ${formatSigned(summary.adjustment + summary.other)}`);
+  return parts.join(' + ');
+}
+
+function formatSigned(value) {
+  const amount = sanitizeNumber(value);
+  return `${amount >= 0 ? '+' : '-'}${formatRp(Math.abs(amount))}`;
 }
 
 function buildWhatsappMessage(calc) {
   const lines = [];
   lines.push(`*${state.receipt.merchant || 'Split Bill'}*`);
   if (state.receipt.date) lines.push(state.receipt.date);
+  lines.push(`Urutan nota: ${describeCalculationMode()}`);
   lines.push('');
   calc.rows.forEach((row) => {
-    lines.push(`• ${row.name}: ${formatRp(row.total)} (menu ${formatRp(row.itemsOnly)} + fee ${formatRp(row.fees)})`);
+    const stepText = formatStepSummary(row.stepSummary);
+    lines.push(`• ${row.name}: ${formatRp(row.total)} (menu ${formatRp(row.itemsOnly)}${stepText ? `; ${stepText}` : ''})`);
   });
   lines.push('');
   lines.push(`Total item: ${formatRp(calc.itemGrand)}`);
-  lines.push(`Pajak + service: ${formatRp(calc.fees)}`);
-  if (calc.adjustment) lines.push(`Diskon / penyesuaian: ${formatRp(calc.adjustment)}`);
+  calc.effectiveSteps.forEach((step) => {
+    lines.push(`${step.label}: ${formatSigned(step.amount)}`);
+  });
   lines.push(`Grand total: ${formatRp(calc.grand)}`);
   return lines.join('\n');
 }
@@ -282,8 +429,15 @@ function render(syncInputs = true) {
     el.subtotalInput.value = sanitizeNumber(state.receipt.subtotal);
     el.taxInput.value = sanitizeNumber(state.receipt.tax);
     el.serviceInput.value = sanitizeNumber(state.receipt.service);
-    el.discountInput.value = sanitizeNumber(state.receipt.discount);
+    el.discountInput.value = Math.abs(sanitizeNumber(state.receipt.discount));
     el.totalInput.value = sanitizeNumber(state.receipt.total);
+    el.calculationModeSelect.value = state.receipt.calculationMode || 'ai_steps';
+  }
+  el.calcStepsHint.textContent = describeCalculationMode();
+
+  const effectiveSteps = getEffectiveSteps();
+  if (state.receipt.calculationMode === 'ai_steps' && effectiveSteps.length) {
+    el.calcStepsHint.textContent += ` Detail: ${effectiveSteps.map((step) => `${step.label} ${formatSigned(step.amount)}`).join(' → ')}`;
   }
 
   el.peopleChips.innerHTML = state.people.map((name) => `
@@ -332,7 +486,7 @@ function render(syncInputs = true) {
   el.resultsContainer.innerHTML = calc.rows.map((row) => `
     <div class="result-card">
       <strong>${escapeHtml(row.name)}</strong>
-      <div class="muted">Menu ${formatRp(row.itemsOnly)} + fee ${formatRp(row.fees)}${row.adjustment ? ` + adj ${formatRp(row.adjustment)}` : ''}</div>
+      <div class="muted">Menu ${formatRp(row.itemsOnly)}${formatStepSummary(row.stepSummary) ? ` + ${formatStepSummary(row.stepSummary)}` : ''}</div>
       <div style="font-size:20px; font-weight:800; margin-top:6px;">${formatRp(row.total)}</div>
     </div>
   `).join('');
@@ -369,8 +523,9 @@ function bindEvents() {
   el.addItemBtn.addEventListener('click', addManualItem);
   el.splitAllQtyBtn.addEventListener('click', splitAllQtyItems);
 
-  [el.merchantInput, el.dateInput, el.subtotalInput, el.taxInput, el.serviceInput, el.discountInput, el.totalInput].forEach((node) => {
+  [el.merchantInput, el.dateInput, el.subtotalInput, el.taxInput, el.serviceInput, el.discountInput, el.totalInput, el.calculationModeSelect].forEach((node) => {
     node.addEventListener('input', updateReceiptFieldsFromInputs);
+    node.addEventListener('change', updateReceiptFieldsFromInputs);
   });
 
   document.body.addEventListener('click', (e) => {

@@ -74,6 +74,19 @@
             <label>Total</label>
             <input id="totalInput" type="number" min="0" step="1" />
           </div>
+          <div style="grid-column: 1 / -1;">
+            <label>Urutan hitung nota</label>
+            <select id="calculationModeSelect">
+              <option value="ai_steps">Ikuti hasil baca AI dari nota</option>
+              <option value="subtotal_discount_tax_service">Subtotal → Discount → Tax → Service</option>
+              <option value="subtotal_discount_service_tax">Subtotal → Discount → Service → Tax</option>
+              <option value="subtotal_tax_service_discount">Subtotal → Tax → Service → Discount</option>
+              <option value="subtotal_tax_discount_service">Subtotal → Tax → Discount → Service</option>
+              <option value="subtotal_service_discount_tax">Subtotal → Service → Discount → Tax</option>
+              <option value="subtotal_service_tax_discount">Subtotal → Service → Tax → Discount</option>
+            </select>
+            <div id="calcStepsHint" class="help" style="margin-top:8px;"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -102,7 +115,7 @@
         <hr />
 
         <h2>5. Hasil Hitung</h2>
-        <div class="help">Pajak dan service dibagi rata. Diskon atau penyesuaian dari struk akan dibagi proporsional agar grand total tetap sama dengan nota.</div>
+        <div class="help">Urutan hitung akan mengikuti nota. Discount, tax, dan service dibagikan proporsional sesuai langkah perhitungan yang dipilih atau dibaca AI dari struk.</div>
         <div id="resultsContainer" class="results"></div>
 
         <div class="totals-box">
