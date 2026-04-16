@@ -1,553 +1,623 @@
-import React, { useMemo, useRef, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { Camera, Upload, ScanText, Users, Calculator, MessageCircle, Plus, Trash2, Loader2, Copy } from "lucide-react";
-import { motion } from "framer-motion";
-import Tesseract from "tesseract.js";
-
-function formatRupiah(value) {
-  const number = Number(value || 0);
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(number);
-}
-
-function normalizePrice(raw) {
-  if (!raw) return 0;
-  let cleaned = String(raw).replace(/[^\d.,]/g, "");
-  if (!cleaned) return 0;
-
-  // Handle common receipt formats: 12.000, 12000, 12,000
-  if (cleaned.includes(".") && cleaned.includes(",")) {
-    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
-  } else {
-    const commaCount = (cleaned.match(/,/g) || []).length;
-    const dotCount = (cleaned.match(/\./g) || []).length;
-    if (commaCount > 0 && dotCount === 0) {
-      const parts = cleaned.split(",");
-      if (parts[parts.length - 1]?.length === 3) {
-        cleaned = parts.join("");
-      } else {
-        cleaned = cleaned.replace(",", ".");
-      }
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Split Bill Struk</title>
+  <meta name="description" content="Web app split bill dari foto struk dengan OCR, edit manual, export gambar, dan share WhatsApp." />
+  <style>
+    :root {
+      --bg: #eef3ff;
+      --card: rgba(255,255,255,0.9);
+      --text: #16213e;
+      --muted: #617199;
+      --border: #d8e2fb;
+      --primary: #4f67f5;
+      --primary2: #6d83fb;
+      --soft: #edf2ff;
+      --danger: #c23d4d;
+      --ok: #18764a;
+      --warn: #a56a15;
     }
-    if (dotCount > 0 && commaCount === 0) {
-      const parts = cleaned.split(".");
-      if (parts[parts.length - 1]?.length === 3) {
-        cleaned = parts.join("");
-      }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(180deg, #f5f8ff 0%, var(--bg) 100%);
+      color: var(--text);
     }
-  }
-
-  const num = Number(cleaned);
-  return Number.isFinite(num) ? num : 0;
-}
-
-function extractReceiptItems(text) {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const blockedKeywords = [
-    "subtotal",
-    "total",
-    "tax",
-    "ppn",
-    "service",
-    "change",
-    "cash",
-    "debit",
-    "credit",
-    "promo",
-    "diskon",
-    "discount",
-    "amount",
-    "bill",
-    "rekening",
-    "table",
-    "no.",
-    "date",
-    "jam",
-    "waktu",
-    "terima kasih",
-    "thank you",
-  ];
-
-  const results = [];
-
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (blockedKeywords.some((kw) => lower.includes(kw))) continue;
-
-    // Pattern examples:
-    // ESTEH 12000
-    // SOTO AYAM 18.000
-    // 2 NASI GORENG 25.000
-    // NASI GORENG x2 25000
-    const match = line.match(/^(.*?)(?:\s+|\t)(\d{1,3}(?:[.,]\d{3})+|\d{3,})(?:\s*)$/);
-    if (!match) continue;
-
-    let namePart = match[1].trim();
-    const pricePart = match[2].trim();
-
-    if (!namePart || namePart.length < 2) continue;
-
-    let qty = 1;
-    const qtyPrefix = namePart.match(/^(\d+)\s+(.+)$/i);
-    if (qtyPrefix) {
-      qty = Number(qtyPrefix[1]) || 1;
-      namePart = qtyPrefix[2].trim();
+    .app { max-width: 1460px; margin: 0 auto; padding: 24px; }
+    .hero, .card {
+      background: var(--card);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(120,140,200,.18);
+      box-shadow: 0 16px 40px rgba(40,60,120,.08);
+      border-radius: 28px;
     }
-
-    const qtySuffix = namePart.match(/^(.+?)\s*[xX]\s*(\d+)$/);
-    if (qtySuffix) {
-      namePart = qtySuffix[1].trim();
-      qty = Number(qtySuffix[2]) || qty;
+    .hero { padding: 28px; margin-bottom: 20px; }
+    .eyebrow { color: #4f63c3; font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+    h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.2rem); line-height: 1.05; }
+    .hero p { color: #51617f; max-width: 900px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .badges span, .pill { background: var(--soft); color: #32469a; border-radius: 999px; padding: 8px 14px; font-size: .86rem; font-weight: 600; }
+    .grid { display: grid; gap: 20px; grid-template-columns: 1.25fr .85fr; }
+    .full { grid-column: 1 / -1; }
+    .card { padding: 22px; }
+    .head { margin-bottom: 16px; }
+    .head.flex { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+    h2 { margin: 0; font-size: 1.2rem; }
+    .head p { margin: 6px 0 0; color: var(--muted); font-size: .95rem; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; }
+    button, input, select, textarea { font: inherit; }
+    input, select, textarea {
+      width: 100%; border: 1px solid var(--border); border-radius: 16px; padding: 12px 14px; background: white; color: var(--text);
+      outline: none;
     }
-
-    const price = normalizePrice(pricePart);
-    if (!price) continue;
-
-    results.push({
-      id: crypto.randomUUID(),
-      name: namePart,
-      qty,
-      price,
-      assignedTo: "unassigned",
-    });
-  }
-
-  return results;
-}
-
-function App() {
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState("");
-  const [ocrText, setOcrText] = useState("");
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
-  const [items, setItems] = useState([]);
-  const [newPerson, setNewPerson] = useState("");
-  const [people, setPeople] = useState(["Danny", "Debbie", "Makan Tengah"]);
-  const [sharedTax, setSharedTax] = useState(0);
-  const [sharedService, setSharedService] = useState(0);
-  const [sharedOther, setSharedOther] = useState(0);
-  const [whatsAppTarget, setWhatsAppTarget] = useState("");
-  const fileInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
-
-  const grandItemsTotal = useMemo(() => items.reduce((sum, item) => sum + Number(item.price || 0), 0), [items]);
-  const sharedTotal = Number(sharedTax || 0) + Number(sharedService || 0) + Number(sharedOther || 0);
-
-  const calculations = useMemo(() => {
-    const activePeople = people.filter(Boolean);
-    const personMap = Object.fromEntries(activePeople.map((p) => [p, 0]));
-
-    items.forEach((item) => {
-      if (!item.assignedTo || item.assignedTo === "unassigned") return;
-      const value = Number(item.price || 0);
-      if (!personMap[item.assignedTo]) personMap[item.assignedTo] = 0;
-      personMap[item.assignedTo] += value;
-    });
-
-    const sharePerPerson = activePeople.length ? sharedTotal / activePeople.length : 0;
-    const result = activePeople.map((person) => ({
-      name: person,
-      itemsTotal: personMap[person] || 0,
-      sharedFee: sharePerPerson,
-      total: (personMap[person] || 0) + sharePerPerson,
-    }));
-
-    const assignedSum = result.reduce((sum, row) => sum + row.total, 0);
-
-    return {
-      rows: result,
-      sharePerPerson,
-      assignedSum,
-    };
-  }, [items, people, sharedTotal]);
-
-  const unassignedCount = items.filter((item) => item.assignedTo === "unassigned").length;
-
-  const handleFile = (file) => {
-    if (!file) return;
-    setImageFile(file);
-    const url = URL.createObjectURL(file);
-    setImagePreview(url);
-  };
-
-  const handleScan = async () => {
-    if (!imageFile) return;
-    setIsScanning(true);
-    setScanProgress(0);
-
-    try {
-      const result = await Tesseract.recognize(imageFile, "eng", {
-        logger: (m) => {
-          if (m.status === "recognizing text") {
-            setScanProgress(Math.round((m.progress || 0) * 100));
-          }
-        },
-      });
-      const text = result.data.text || "";
-      setOcrText(text);
-      const extracted = extractReceiptItems(text);
-      setItems(extracted);
-    } catch (error) {
-      console.error(error);
-      alert("Gagal membaca struk. Coba foto yang lebih terang dan lurus.");
-    } finally {
-      setIsScanning(false);
+    input:focus, select:focus, textarea:focus { border-color: #6f86fb; box-shadow: 0 0 0 4px rgba(111,134,251,.12); }
+    textarea { resize: vertical; }
+    button {
+      border: 0; border-radius: 16px; padding: 12px 16px; cursor: pointer; transition: .2s ease;
     }
-  };
-
-  const handleParseManualText = () => {
-    const extracted = extractReceiptItems(ocrText);
-    setItems(extracted);
-  };
-
-  const addPerson = () => {
-    const name = newPerson.trim();
-    if (!name) return;
-    if (people.includes(name)) return;
-    setPeople((prev) => [...prev, name]);
-    setNewPerson("");
-  };
-
-  const removePerson = (name) => {
-    setPeople((prev) => prev.filter((p) => p !== name));
-    setItems((prev) =>
-      prev.map((item) => (item.assignedTo === name ? { ...item, assignedTo: "unassigned" } : item))
-    );
-  };
-
-  const updateItem = (id, patch) => {
-    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
-  };
-
-  const addManualItem = () => {
-    setItems((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        name: "Menu baru",
-        qty: 1,
-        price: 0,
-        assignedTo: "unassigned",
-      },
-    ]);
-  };
-
-  const deleteItem = (id) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const whatsappMessage = useMemo(() => {
-    const lines = [
-      "*Split Bill Result*",
-      "",
-      ...calculations.rows.map(
-        (row) =>
-          `• ${row.name}: ${formatRupiah(row.total)} (menu ${formatRupiah(row.itemsTotal)} + shared ${formatRupiah(row.sharedFee)})`
-      ),
-      "",
-      `Total menu: ${formatRupiah(grandItemsTotal)}`,
-      `Biaya bersama: ${formatRupiah(sharedTotal)}`,
-      `Grand total: ${formatRupiah(grandItemsTotal + sharedTotal)}`,
-    ];
-    return lines.join("\n");
-  }, [calculations.rows, grandItemsTotal, sharedTotal]);
-
-  const whatsappHref = useMemo(() => {
-    const target = whatsAppTarget.replace(/[^\d]/g, "");
-    const encoded = encodeURIComponent(whatsappMessage);
-    return target ? `https://wa.me/${target}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
-  }, [whatsAppTarget, whatsappMessage]);
-
-  const copySummary = async () => {
-    try {
-      await navigator.clipboard.writeText(whatsappMessage);
-      alert("Ringkasan berhasil disalin.");
-    } catch (e) {
-      console.error(e);
+    .primary { background: linear-gradient(135deg, var(--primary), var(--primary2)); color: white; box-shadow: 0 10px 24px rgba(79,103,245,.24); }
+    .secondary { background: var(--soft); color: #2f4590; }
+    .danger { background: #ffe7ea; color: var(--danger); }
+    .preview {
+      margin-top: 16px; min-height: 250px; border-radius: 22px; background: #f9fbff; border: 1px dashed #c4d3f2;
+      display: grid; place-items: center; overflow: hidden;
     }
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
-          <Card className="rounded-3xl border-0 shadow-lg">
-            <CardHeader>
-              <CardTitle className="text-3xl font-bold tracking-tight">Receipt Split Bill</CardTitle>
-              <CardDescription className="text-base">
-                Upload atau foto struk, baca item otomatis, assign ke orang, lalu share hasilnya ke WhatsApp.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        </motion.div>
-
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="space-y-6 lg:col-span-2">
-            <Card className="rounded-3xl border-0 shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-xl"><Camera className="h-5 w-5" /> 1. Foto / Import Struk</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap gap-3">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => handleFile(e.target.files?.[0])}
-                  />
-                  <input
-                    ref={cameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={(e) => handleFile(e.target.files?.[0])}
-                  />
-                  <Button className="rounded-2xl" onClick={() => cameraInputRef.current?.click()}>
-                    <Camera className="mr-2 h-4 w-4" /> Ambil dari Kamera
-                  </Button>
-                  <Button variant="outline" className="rounded-2xl" onClick={() => fileInputRef.current?.click()}>
-                    <Upload className="mr-2 h-4 w-4" /> Import Foto
-                  </Button>
-                  <Button className="rounded-2xl" onClick={handleScan} disabled={!imageFile || isScanning}>
-                    {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ScanText className="mr-2 h-4 w-4" />}
-                    {isScanning ? `Scanning ${scanProgress}%` : "Proses OCR"}
-                  </Button>
-                </div>
-
-                {imagePreview ? (
-                  <div className="overflow-hidden rounded-3xl border bg-white p-3">
-                    <img src={imagePreview} alt="Receipt preview" className="max-h-[420px] w-full rounded-2xl object-contain" />
-                  </div>
-                ) : (
-                  <div className="rounded-3xl border border-dashed bg-white p-10 text-center text-sm text-slate-500">
-                    Belum ada foto struk.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-0 shadow-md">
-              <CardHeader>
-                <CardTitle className="text-xl">2. Hasil Pembacaan Struk</CardTitle>
-                <CardDescription>
-                  Sistem mencoba membaca nama menu dan harga otomatis. Kalau ada yang keliru, bisa diedit manual.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Tabs defaultValue="items" className="w-full">
-                  <TabsList className="grid w-full grid-cols-2 rounded-2xl">
-                    <TabsTrigger value="items">Item Terdeteksi</TabsTrigger>
-                    <TabsTrigger value="raw">Teks OCR</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="items" className="mt-4 space-y-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary">{items.length} item</Badge>
-                      <Badge variant={unassignedCount ? "destructive" : "secondary"}>{unassignedCount} belum di-assign</Badge>
-                      <Button variant="outline" className="rounded-2xl" onClick={addManualItem}>
-                        <Plus className="mr-2 h-4 w-4" /> Tambah Item Manual
-                      </Button>
-                    </div>
-
-                    <div className="space-y-3">
-                      {items.map((item) => (
-                        <div key={item.id} className="grid gap-3 rounded-2xl border bg-white p-4 md:grid-cols-12">
-                          <div className="md:col-span-4">
-                            <Label>Menu</Label>
-                            <Input value={item.name} onChange={(e) => updateItem(item.id, { name: e.target.value })} className="mt-1 rounded-xl" />
-                          </div>
-                          <div className="md:col-span-2">
-                            <Label>Qty</Label>
-                            <Input
-                              type="number"
-                              min="1"
-                              value={item.qty}
-                              onChange={(e) => updateItem(item.id, { qty: Number(e.target.value || 1) })}
-                              className="mt-1 rounded-xl"
-                            />
-                          </div>
-                          <div className="md:col-span-2">
-                            <Label>Harga</Label>
-                            <Input
-                              type="number"
-                              min="0"
-                              value={item.price}
-                              onChange={(e) => updateItem(item.id, { price: Number(e.target.value || 0) })}
-                              className="mt-1 rounded-xl"
-                            />
-                          </div>
-                          <div className="md:col-span-3">
-                            <Label>Dimakan oleh</Label>
-                            <Select value={item.assignedTo} onValueChange={(value) => updateItem(item.id, { assignedTo: value })}>
-                              <SelectTrigger className="mt-1 rounded-xl">
-                                <SelectValue placeholder="Pilih nama" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="unassigned">Belum di-assign</SelectItem>
-                                {people.map((person) => (
-                                  <SelectItem key={person} value={person}>{person}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="flex items-end md:col-span-1">
-                            <Button variant="ghost" className="w-full rounded-xl" onClick={() => deleteItem(item.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-
-                      {!items.length && (
-                        <div className="rounded-2xl border border-dashed bg-white p-8 text-center text-sm text-slate-500">
-                          Belum ada item. Jalankan OCR atau tambah item manual.
-                        </div>
-                      )}
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="raw" className="mt-4 space-y-4">
-                    <Textarea
-                      value={ocrText}
-                      onChange={(e) => setOcrText(e.target.value)}
-                      rows={14}
-                      className="rounded-2xl"
-                      placeholder="Teks hasil OCR akan muncul di sini..."
-                    />
-                    <Button className="rounded-2xl" onClick={handleParseManualText}>Parse Ulang dari Teks</Button>
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="space-y-6">
-            <Card className="rounded-3xl border-0 shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-xl"><Users className="h-5 w-5" /> 3. Daftar Nama</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Tambah nama"
-                    value={newPerson}
-                    onChange={(e) => setNewPerson(e.target.value)}
-                    className="rounded-2xl"
-                  />
-                  <Button className="rounded-2xl" onClick={addPerson}><Plus className="h-4 w-4" /></Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {people.map((person) => (
-                    <div key={person} className="flex items-center gap-2 rounded-2xl bg-white px-3 py-2 shadow-sm">
-                      <span className="text-sm font-medium">{person}</span>
-                      <button onClick={() => removePerson(person)} className="text-slate-400 hover:text-red-500">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-0 shadow-md">
-              <CardHeader>
-                <CardTitle className="text-xl">Biaya Bersama</CardTitle>
-                <CardDescription>Pajak, service, atau biaya lain dibagi rata ke semua nama.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div>
-                  <Label>Pajak / PPN</Label>
-                  <Input type="number" min="0" value={sharedTax} onChange={(e) => setSharedTax(Number(e.target.value || 0))} className="mt-1 rounded-2xl" />
-                </div>
-                <div>
-                  <Label>Service</Label>
-                  <Input type="number" min="0" value={sharedService} onChange={(e) => setSharedService(Number(e.target.value || 0))} className="mt-1 rounded-2xl" />
-                </div>
-                <div>
-                  <Label>Biaya Lain</Label>
-                  <Input type="number" min="0" value={sharedOther} onChange={(e) => setSharedOther(Number(e.target.value || 0))} className="mt-1 rounded-2xl" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-0 shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-xl"><Calculator className="h-5 w-5" /> 4. Hasil Hitung</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-3 rounded-2xl bg-white p-4">
-                  {calculations.rows.map((row) => (
-                    <div key={row.name} className="rounded-2xl border p-3">
-                      <div className="text-sm text-slate-500">{row.name}</div>
-                      <div className="text-lg font-semibold">{formatRupiah(row.total)}</div>
-                      <div className="text-xs text-slate-500">
-                        Menu {formatRupiah(row.itemsTotal)} + Shared {formatRupiah(row.sharedFee)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <Separator />
-
-                <div className="space-y-1 text-sm">
-                  <div className="flex items-center justify-between"><span>Total menu</span><span>{formatRupiah(grandItemsTotal)}</span></div>
-                  <div className="flex items-center justify-between"><span>Biaya bersama</span><span>{formatRupiah(sharedTotal)}</span></div>
-                  <div className="flex items-center justify-between font-semibold"><span>Grand total</span><span>{formatRupiah(grandItemsTotal + sharedTotal)}</span></div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-0 shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-xl"><MessageCircle className="h-5 w-5" /> 5. Share WhatsApp</CardTitle>
-                <CardDescription>Isi nomor tujuan opsional. Kosongkan jika ingin pilih chat manual di WhatsApp.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label>No. WhatsApp</Label>
-                  <Input
-                    placeholder="6281234567890"
-                    value={whatsAppTarget}
-                    onChange={(e) => setWhatsAppTarget(e.target.value)}
-                    className="mt-1 rounded-2xl"
-                  />
-                </div>
-                <Textarea value={whatsappMessage} readOnly rows={10} className="rounded-2xl" />
-                <div className="grid grid-cols-2 gap-3">
-                  <Button variant="outline" className="rounded-2xl" onClick={copySummary}>
-                    <Copy className="mr-2 h-4 w-4" /> Copy
-                  </Button>
-                  <a href={whatsappHref} target="_blank" rel="noreferrer" className="w-full">
-                    <Button className="w-full rounded-2xl">
-                      <MessageCircle className="mr-2 h-4 w-4" /> Share WhatsApp
-                    </Button>
-                  </a>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+    .preview img { width: 100%; max-height: 520px; object-fit: contain; display: block; }
+    .placeholder { color: var(--muted); padding: 40px 20px; text-align: center; }
+    .status { margin-top: 14px; background: #eff8ff; color: #23598b; border: 1px solid #cfe7ff; border-radius: 16px; padding: 12px 14px; }
+    .form-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    label span { display: block; font-size: .9rem; margin-bottom: 7px; font-weight: 600; color: #34415d; }
+    .table { display: grid; gap: 10px; }
+    .table-head, .table-row { display: grid; grid-template-columns: 2.2fr .7fr 1fr 1.3fr .8fr; gap: 10px; align-items: center; }
+    .table-head { font-size: .88rem; font-weight: 700; color: #526180; }
+    .empty { border: 1px dashed #c4d3f2; border-radius: 18px; background: #f9fbff; padding: 28px; text-align: center; color: var(--muted); }
+    .chip-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .chip { display: flex; align-items: center; gap: 8px; background: #f3f6ff; border-radius: 999px; padding: 8px 12px; }
+    .chip button { background: transparent; color: #7382a6; padding: 0; font-size: 1rem; }
+    .summary-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+    .summary { border-radius: 20px; background: #f9fbff; border: 1px solid var(--border); padding: 16px; }
+    .summary .amount { font-size: 1.25rem; font-weight: 800; margin: 4px 0; }
+    .summary small { color: var(--muted); }
+    .totals { margin-top: 14px; border-top: 1px solid #e2e9fb; padding-top: 12px; display: grid; gap: 10px; }
+    .totals div, .export-footer div { display: flex; justify-content: space-between; gap: 12px; }
+    .pill.ok { background: #ebfff4; color: var(--ok); }
+    .pill.warn { background: #fff1e2; color: var(--warn); }
+    .export-card {
+      background: linear-gradient(135deg, #1d2440, #31407a 70%, #4f67bf); color: white; border-radius: 28px; padding: 24px;
+      box-shadow: 0 18px 40px rgba(28,37,75,.25);
+    }
+    .export-top { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 18px; }
+    .mini { margin: 0 0 4px; text-transform: uppercase; letter-spacing: .1em; font-size: .74rem; color: rgba(255,255,255,.72); }
+    .export-top h3 { margin: 0; font-size: 1.7rem; }
+    .export-top p { margin: 4px 0 0; color: rgba(255,255,255,.78); }
+    .export-badge { background: rgba(255,255,255,.14); border-radius: 999px; padding: 8px 14px; font-size: .85rem; font-weight: 700; }
+    .export-list { display: grid; gap: 10px; margin-bottom: 18px; }
+    .export-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 16px; border-radius: 18px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.12); }
+    .export-row p { margin: 2px 0 0; font-size: .92rem; color: rgba(255,255,255,.75); }
+    .export-price { font-size: 1.06rem; font-weight: 800; }
+    .export-footer { border-top: 1px solid rgba(255,255,255,.16); padding-top: 14px; display: grid; gap: 8px; }
+    .export-footer .grand { margin-top: 6px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,.22); font-size: 1.02rem; }
+    .top-gap { margin-top: 12px; }
+    @media (max-width: 1080px) { .grid { grid-template-columns: 1fr; } .full { grid-column: auto; } }
+    @media (max-width: 760px) {
+      .app { padding: 16px; }
+      .hero, .card { padding: 18px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .head.flex, .export-top { flex-direction: column; align-items: stretch; }
+      .table-head { display: none; }
+      .table-row { grid-template-columns: 1fr; border: 1px solid var(--border); border-radius: 18px; background: #f9fbff; padding: 12px; }
+      .export-row { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="hero">
+      <div class="eyebrow">Static Web Siap GitHub Pages</div>
+      <h1>Split Bill dari Foto Struk</h1>
+      <p>Foto atau import struk, scan otomatis item + subtotal + pajak + service, edit manual jika salah, hitung per orang, lalu export tagihan cantik dan share ke WhatsApp.</p>
+      <div class="badges">
+        <span>OCR struk</span>
+        <span>Edit manual</span>
+        <span>Export PNG</span>
+        <span>WhatsApp share</span>
       </div>
     </div>
-  );
-}
 
-export default App;
+    <div class="grid">
+      <section class="card full">
+        <div class="head">
+          <h2>1. Upload Struk</h2>
+          <p>Ambil foto langsung dari kamera atau import dari galeri.</p>
+        </div>
+        <div class="row">
+          <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
+          <input id="fileInput" type="file" accept="image/*" hidden>
+          <button class="primary" id="cameraBtn">Buka Kamera</button>
+          <button class="secondary" id="importBtn">Import Foto</button>
+          <button class="primary" id="scanBtn">Proses OCR</button>
+        </div>
+        <div class="preview" id="previewBox"><div class="placeholder">Belum ada foto struk</div></div>
+        <div class="status" id="statusBox">Siap digunakan.</div>
+      </section>
+
+      <aside class="card">
+        <div class="head">
+          <h2>2. Info Struk</h2>
+          <p>Nama resto, tanggal, subtotal, pajak, dan service bisa otomatis lalu tetap bisa diedit manual.</p>
+        </div>
+        <div class="form-grid">
+          <label><span>Nama resto / cafe</span><input id="restaurantName" placeholder="Contoh: Soto Ayam Pak Slamet"></label>
+          <label><span>Tanggal transaksi</span><input id="transactionDate" type="date"></label>
+          <label><span>Subtotal</span><input id="subtotal" type="number" min="0" value="0"></label>
+          <label><span>Pajak</span><input id="tax" type="number" min="0" value="0"></label>
+          <label><span>Service</span><input id="service" type="number" min="0" value="0"></label>
+          <label><span>Biaya lain</span><input id="otherFee" type="number" min="0" value="0"></label>
+        </div>
+      </aside>
+
+      <section class="card">
+        <div class="head">
+          <h2>3. Daftar Nama</h2>
+          <p>Tambahkan orang yang ikut makan.</p>
+        </div>
+        <div class="row">
+          <input id="newPerson" placeholder="Tambah nama">
+          <button class="primary" id="addPersonBtn">Tambah</button>
+        </div>
+        <div class="chip-list" id="peopleList"></div>
+      </section>
+
+      <section class="card full">
+        <div class="head flex">
+          <div>
+            <h2>4. Hasil Scan Menu</h2>
+            <p>Menu dan harga bisa diedit manual jika OCR kurang akurat.</p>
+          </div>
+          <div class="row">
+            <button class="secondary" id="addItemBtn">Tambah Item</button>
+            <span class="pill warn" id="unassignedPill">0 belum di-assign</span>
+          </div>
+        </div>
+        <div class="table" id="itemsTable">
+          <div class="table-head">
+            <div>Menu</div><div>Qty</div><div>Harga</div><div>Yang makan</div><div>Aksi</div>
+          </div>
+          <div class="empty" id="itemsEmpty">Belum ada item. Jalankan OCR atau tambah manual.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="head">
+          <h2>5. Raw OCR Text</h2>
+          <p>Bisa dipakai untuk koreksi manual lalu parse ulang.</p>
+        </div>
+        <textarea id="ocrText" rows="14" placeholder="Teks hasil OCR akan muncul di sini"></textarea>
+        <div class="row top-gap"><button class="secondary" id="parseBtn">Parse Ulang dari Teks</button></div>
+      </section>
+
+      <section class="card">
+        <div class="head">
+          <h2>6. Hasil Split Bill</h2>
+          <p>Total per orang langsung dihitung otomatis.</p>
+        </div>
+        <div class="summary-list" id="summaryList"></div>
+        <div class="totals" id="totalsBox"></div>
+      </section>
+
+      <section class="card full">
+        <div class="head flex">
+          <div>
+            <h2>7. Export Gambar Tagihan</h2>
+            <p>Siap disimpan atau dibagikan ke grup WhatsApp.</p>
+          </div>
+          <button class="primary" id="exportBtn">Export PNG</button>
+        </div>
+        <div class="export-card" id="exportCard">
+          <div class="export-top">
+            <div>
+              <div class="mini">Split Bill</div>
+              <h3 id="exportRestaurant">Nama resto / cafe</h3>
+              <p id="exportDate">-</p>
+            </div>
+            <div class="export-badge">Siap Bayar</div>
+          </div>
+          <div class="export-list" id="exportList"></div>
+          <div class="export-footer" id="exportFooter"></div>
+        </div>
+      </section>
+
+      <section class="card full">
+        <div class="head">
+          <h2>8. Share WhatsApp</h2>
+          <p>Kirim hasil split bill ke chat pribadi atau grup.</p>
+        </div>
+        <label><span>No. WhatsApp tujuan (opsional)</span><input id="phone" placeholder="6281234567890"></label>
+        <textarea id="waText" rows="11" readonly class="top-gap"></textarea>
+        <div class="row top-gap"><button class="primary" id="shareBtn">Share WhatsApp</button></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+  <script>
+    const state = {
+      imageFile: null,
+      imageUrl: '',
+      ocrText: '',
+      people: ['Danny', 'Debbie', 'Makan Tengah'],
+      items: []
+    };
+
+    const els = {
+      cameraInput: document.getElementById('cameraInput'),
+      fileInput: document.getElementById('fileInput'),
+      cameraBtn: document.getElementById('cameraBtn'),
+      importBtn: document.getElementById('importBtn'),
+      scanBtn: document.getElementById('scanBtn'),
+      previewBox: document.getElementById('previewBox'),
+      statusBox: document.getElementById('statusBox'),
+      restaurantName: document.getElementById('restaurantName'),
+      transactionDate: document.getElementById('transactionDate'),
+      subtotal: document.getElementById('subtotal'),
+      tax: document.getElementById('tax'),
+      service: document.getElementById('service'),
+      otherFee: document.getElementById('otherFee'),
+      newPerson: document.getElementById('newPerson'),
+      addPersonBtn: document.getElementById('addPersonBtn'),
+      peopleList: document.getElementById('peopleList'),
+      addItemBtn: document.getElementById('addItemBtn'),
+      unassignedPill: document.getElementById('unassignedPill'),
+      itemsTable: document.getElementById('itemsTable'),
+      itemsEmpty: document.getElementById('itemsEmpty'),
+      ocrText: document.getElementById('ocrText'),
+      parseBtn: document.getElementById('parseBtn'),
+      summaryList: document.getElementById('summaryList'),
+      totalsBox: document.getElementById('totalsBox'),
+      exportBtn: document.getElementById('exportBtn'),
+      exportCard: document.getElementById('exportCard'),
+      exportRestaurant: document.getElementById('exportRestaurant'),
+      exportDate: document.getElementById('exportDate'),
+      exportList: document.getElementById('exportList'),
+      exportFooter: document.getElementById('exportFooter'),
+      phone: document.getElementById('phone'),
+      waText: document.getElementById('waText'),
+      shareBtn: document.getElementById('shareBtn')
+    };
+
+    function uid() {
+      return Math.random().toString(36).slice(2, 10);
+    }
+
+    function todayInput() {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
+    function rupiah(val) {
+      return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(val || 0));
+    }
+
+    function num(value) {
+      return Number(value || 0);
+    }
+
+    function cleanCurrency(raw) {
+      if (!raw) return 0;
+      let value = String(raw).replace(/[^\d.,]/g, '');
+      if (!value) return 0;
+      if (value.includes('.') && value.includes(',')) {
+        value = value.replace(/\./g, '').replace(',', '.');
+      } else if (value.includes('.')) {
+        const parts = value.split('.');
+        if (parts[parts.length - 1] && parts[parts.length - 1].length === 3) value = parts.join('');
+      } else if (value.includes(',')) {
+        const parts = value.split(',');
+        if (parts[parts.length - 1] && parts[parts.length - 1].length === 3) value = parts.join('');
+        else value = value.replace(',', '.');
+      }
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function extractDate(text) {
+      const patterns = [
+        /(\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b)/,
+        /(\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b)/,
+        /(\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}\b)/,
+      ];
+      for (const p of patterns) {
+        const match = text.match(p);
+        if (!match) continue;
+        const raw = match[1].replace(/\//g, '-');
+        if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(raw)) return raw;
+        if (/^\d{1,2}-\d{1,2}-\d{2,4}$/.test(raw)) {
+          const parts = raw.split('-');
+          const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+          return `${year}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+        }
+      }
+      return todayInput();
+    }
+
+    function looksLikePriceLine(line) {
+      return /(\d{1,3}(?:[.,]\d{3})+|\d{4,})\s*$/.test(line);
+    }
+
+    function extractReceiptData(text) {
+      const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      let restaurantName = '';
+      for (const line of lines.slice(0, 6)) {
+        const cleaned = line.replace(/[^A-Za-z0-9 &.'-]/g, '').trim();
+        if (cleaned.length >= 3 && !looksLikePriceLine(cleaned)) { restaurantName = cleaned; break; }
+      }
+
+      const metadata = { restaurantName, transactionDate: extractDate(text), subtotal: 0, tax: 0, service: 0, total: 0 };
+      for (const line of lines) {
+        const lower = line.toLowerCase();
+        const trailing = line.match(/(\d{1,3}(?:[.,]\d{3})+|\d{4,})\s*$/);
+        const price = trailing ? cleanCurrency(trailing[1]) : 0;
+        if (!price) continue;
+        if (lower.includes('subtotal') || lower.includes('sub total')) metadata.subtotal = price;
+        else if (lower.includes('tax') || lower.includes('ppn') || lower.includes('pajak')) metadata.tax = price;
+        else if (lower.includes('service') || lower.includes('svc')) metadata.service = price;
+        else if (lower.includes('grand total') || lower.startsWith('total') || lower.includes('jumlah')) metadata.total = price;
+      }
+
+      const blocked = ['subtotal','sub total','total','tax','ppn','pajak','service','cash','change','promo','discount','diskon','thank','terima kasih','table','bill','date','jam','rekening','debit','credit','card','guest','server','dine in','take away'];
+      const items = [];
+      for (const line of lines) {
+        const lower = line.toLowerCase();
+        if (blocked.some(k => lower.includes(k))) continue;
+        const match = line.match(/^(.*?)(?:\s{1,}|\t+)(\d{1,3}(?:[.,]\d{3})+|\d{4,})\s*$/);
+        if (!match) continue;
+        let itemName = match[1].trim();
+        const price = cleanCurrency(match[2]);
+        if (!itemName || !price) continue;
+        let qty = 1;
+        const prefixQty = itemName.match(/^(\d+)\s+(.+)$/);
+        if (prefixQty) { qty = Number(prefixQty[1]) || 1; itemName = prefixQty[2].trim(); }
+        const suffixQty = itemName.match(/^(.+?)\s*[xX]\s*(\d+)$/);
+        if (suffixQty) { itemName = suffixQty[1].trim(); qty = Number(suffixQty[2]) || qty; }
+        if (itemName.length < 2) continue;
+        items.push({ id: uid(), name: itemName, qty, price, assignedTo: 'unassigned' });
+      }
+      return { metadata, items };
+    }
+
+    function getComputed() {
+      const itemsTotal = state.items.reduce((sum, item) => sum + num(item.price), 0);
+      const subtotal = num(els.subtotal.value) || itemsTotal;
+      const tax = num(els.tax.value);
+      const service = num(els.service.value);
+      const otherFee = num(els.otherFee.value);
+      const sharedTotal = tax + service + otherFee;
+      const map = {};
+      state.people.forEach(p => map[p] = { name: p, itemsTotal: 0, shared: 0, total: 0 });
+      state.items.forEach(item => {
+        if (item.assignedTo === 'unassigned') return;
+        if (!map[item.assignedTo]) map[item.assignedTo] = { name: item.assignedTo, itemsTotal: 0, shared: 0, total: 0 };
+        map[item.assignedTo].itemsTotal += num(item.price);
+      });
+      const sharedPerPerson = state.people.length ? sharedTotal / state.people.length : 0;
+      const results = Object.values(map).map(row => ({ ...row, shared: sharedPerPerson, total: row.itemsTotal + sharedPerPerson }));
+      return { itemsTotal, subtotal, tax, service, otherFee, sharedTotal, grandTotal: subtotal + sharedTotal, results };
+    }
+
+    function waMessage(computed) {
+      const lines = [
+        `*${els.restaurantName.value || 'Split Bill'}*`,
+        `Tanggal: ${els.transactionDate.value || '-'}`,
+        '',
+        ...computed.results.map(r => `• ${r.name}: ${rupiah(r.total)} (menu ${rupiah(r.itemsTotal)} + shared ${rupiah(r.shared)})`),
+        '',
+        `Subtotal: ${rupiah(computed.subtotal)}`,
+        `Pajak: ${rupiah(computed.tax)}`,
+        `Service: ${rupiah(computed.service)}`,
+        `Biaya lain: ${rupiah(computed.otherFee)}`,
+        `Grand Total: ${rupiah(computed.grandTotal)}`,
+      ];
+      return lines.join('\n');
+    }
+
+    function renderPeople() {
+      els.peopleList.innerHTML = '';
+      state.people.forEach(person => {
+        const div = document.createElement('div');
+        div.className = 'chip';
+        div.innerHTML = `<span>${person}</span>`;
+        const btn = document.createElement('button');
+        btn.textContent = '×';
+        btn.onclick = () => {
+          state.people = state.people.filter(p => p !== person);
+          state.items = state.items.map(item => item.assignedTo === person ? { ...item, assignedTo: 'unassigned' } : item);
+          renderAll();
+        };
+        div.appendChild(btn);
+        els.peopleList.appendChild(div);
+      });
+    }
+
+    function renderItems() {
+      document.querySelectorAll('.data-row').forEach(el => el.remove());
+      els.itemsEmpty.style.display = state.items.length ? 'none' : 'block';
+      const unassigned = state.items.filter(i => i.assignedTo === 'unassigned').length;
+      els.unassignedPill.textContent = `${unassigned} belum di-assign`;
+      els.unassignedPill.className = `pill ${unassigned ? 'warn' : 'ok'}`;
+      state.items.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'table-row data-row';
+
+        const name = document.createElement('input');
+        name.value = item.name;
+        name.oninput = e => { item.name = e.target.value; };
+
+        const qty = document.createElement('input');
+        qty.type = 'number'; qty.min = '1'; qty.value = item.qty;
+        qty.oninput = e => { item.qty = Number(e.target.value || 1); };
+
+        const price = document.createElement('input');
+        price.type = 'number'; price.min = '0'; price.value = item.price;
+        price.oninput = e => { item.price = Number(e.target.value || 0); renderSummary(); };
+
+        const select = document.createElement('select');
+        select.innerHTML = `<option value="unassigned">Belum di-assign</option>` + state.people.map(p => `<option value="${p}">${p}</option>`).join('');
+        select.value = item.assignedTo;
+        select.onchange = e => { item.assignedTo = e.target.value; renderSummary(); renderItems(); };
+
+        const del = document.createElement('button');
+        del.className = 'danger'; del.textContent = 'Hapus';
+        del.onclick = () => { state.items = state.items.filter(x => x.id !== item.id); renderAll(); };
+
+        row.append(name, qty, price, select, del);
+        els.itemsTable.appendChild(row);
+      });
+    }
+
+    function renderSummary() {
+      const computed = getComputed();
+      els.summaryList.innerHTML = '';
+      computed.results.forEach(r => {
+        const div = document.createElement('div');
+        div.className = 'summary';
+        div.innerHTML = `<strong>${r.name}</strong><div class="amount">${rupiah(r.total)}</div><small>Menu ${rupiah(r.itemsTotal)} + shared ${rupiah(r.shared)}</small>`;
+        els.summaryList.appendChild(div);
+      });
+      els.totalsBox.innerHTML = `
+        <div><span>Total item</span><strong>${rupiah(computed.itemsTotal)}</strong></div>
+        <div><span>Subtotal</span><strong>${rupiah(computed.subtotal)}</strong></div>
+        <div><span>Biaya bersama</span><strong>${rupiah(computed.sharedTotal)}</strong></div>
+        <div><span>Grand total</span><strong>${rupiah(computed.grandTotal)}</strong></div>
+      `;
+
+      els.exportRestaurant.textContent = els.restaurantName.value || 'Nama resto / cafe';
+      els.exportDate.textContent = els.transactionDate.value || '-';
+      els.exportList.innerHTML = '';
+      computed.results.forEach(r => {
+        const row = document.createElement('div');
+        row.className = 'export-row';
+        row.innerHTML = `<div><strong>${r.name}</strong><p>Menu ${rupiah(r.itemsTotal)} + shared ${rupiah(r.shared)}</p></div><div class="export-price">${rupiah(r.total)}</div>`;
+        els.exportList.appendChild(row);
+      });
+      els.exportFooter.innerHTML = `
+        <div><span>Subtotal</span><strong>${rupiah(computed.subtotal)}</strong></div>
+        <div><span>Pajak</span><strong>${rupiah(computed.tax)}</strong></div>
+        <div><span>Service</span><strong>${rupiah(computed.service)}</strong></div>
+        <div><span>Biaya lain</span><strong>${rupiah(computed.otherFee)}</strong></div>
+        <div class="grand"><span>Grand Total</span><strong>${rupiah(computed.grandTotal)}</strong></div>
+      `;
+      els.waText.value = waMessage(computed);
+    }
+
+    function renderAll() {
+      renderPeople();
+      renderItems();
+      renderSummary();
+    }
+
+    function setStatus(text) {
+      els.statusBox.textContent = text;
+    }
+
+    function handleImage(file) {
+      if (!file) return;
+      state.imageFile = file;
+      state.imageUrl = URL.createObjectURL(file);
+      els.previewBox.innerHTML = `<img src="${state.imageUrl}" alt="Preview struk">`;
+      setStatus('Foto struk siap diproses.');
+    }
+
+    async function processOCR() {
+      if (!state.imageFile) {
+        setStatus('Pilih foto struk dulu.');
+        return;
+      }
+      setStatus('Sedang membaca struk...');
+      els.scanBtn.disabled = true;
+      try {
+        const result = await Tesseract.recognize(state.imageFile, 'eng', {
+          logger: msg => {
+            if (msg.status === 'recognizing text') setStatus(`Scanning ${Math.round((msg.progress || 0) * 100)}%`);
+          }
+        });
+        state.ocrText = result.data.text || '';
+        els.ocrText.value = state.ocrText;
+        const parsed = extractReceiptData(state.ocrText);
+        if (parsed.metadata.restaurantName) els.restaurantName.value = parsed.metadata.restaurantName;
+        els.transactionDate.value = parsed.metadata.transactionDate || todayInput();
+        els.subtotal.value = parsed.metadata.subtotal || 0;
+        els.tax.value = parsed.metadata.tax || 0;
+        els.service.value = parsed.metadata.service || 0;
+        state.items = parsed.items;
+        setStatus(`OCR selesai. ${parsed.items.length} item terdeteksi.`);
+        renderAll();
+      } catch (e) {
+        console.error(e);
+        setStatus('Gagal membaca struk. Coba foto yang lebih terang dan lurus.');
+      } finally {
+        els.scanBtn.disabled = false;
+      }
+    }
+
+    function parseFromText() {
+      state.ocrText = els.ocrText.value;
+      const parsed = extractReceiptData(state.ocrText);
+      if (parsed.metadata.restaurantName) els.restaurantName.value = parsed.metadata.restaurantName;
+      els.transactionDate.value = parsed.metadata.transactionDate || els.transactionDate.value || todayInput();
+      els.subtotal.value = parsed.metadata.subtotal || 0;
+      els.tax.value = parsed.metadata.tax || 0;
+      els.service.value = parsed.metadata.service || 0;
+      state.items = parsed.items;
+      setStatus(`Teks diparse ulang. ${parsed.items.length} item terdeteksi.`);
+      renderAll();
+    }
+
+    async function exportImage() {
+      try {
+        const dataUrl = await htmlToImage.toPng(els.exportCard, { cacheBust: true, pixelRatio: 2 });
+        const link = document.createElement('a');
+        link.download = `split-bill-${(els.restaurantName.value || 'receipt').replace(/\s+/g, '-').toLowerCase()}.png`;
+        link.href = dataUrl;
+        link.click();
+        setStatus('Gambar tagihan berhasil diexport.');
+      } catch (e) {
+        console.error(e);
+        setStatus('Gagal export gambar.');
+      }
+    }
+
+    function shareWhatsApp() {
+      const encoded = encodeURIComponent(els.waText.value);
+      const phone = els.phone.value.replace(/[^\d]/g, '');
+      const url = phone ? `https://wa.me/${phone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+      window.open(url, '_blank');
+    }
+
+    els.transactionDate.value = todayInput();
+    els.cameraBtn.onclick = () => els.cameraInput.click();
+    els.importBtn.onclick = () => els.fileInput.click();
+    els.cameraInput.onchange = e => handleImage(e.target.files[0]);
+    els.fileInput.onchange = e => handleImage(e.target.files[0]);
+    els.scanBtn.onclick = processOCR;
+    els.parseBtn.onclick = parseFromText;
+    els.addItemBtn.onclick = () => { state.items.push({ id: uid(), name: 'Menu baru', qty: 1, price: 0, assignedTo: 'unassigned' }); renderAll(); };
+    els.addPersonBtn.onclick = () => {
+      const name = els.newPerson.value.trim();
+      if (!name || state.people.includes(name)) return;
+      state.people.push(name); els.newPerson.value = ''; renderAll();
+    };
+    els.exportBtn.onclick = exportImage;
+    els.shareBtn.onclick = shareWhatsApp;
+    [els.restaurantName, els.transactionDate, els.subtotal, els.tax, els.service, els.otherFee].forEach(el => el.addEventListener('input', renderSummary));
+
+    renderAll();
+  </script>
+</body>
+</html>
