@@ -32,14 +32,21 @@ Skema wajib:
   "tax": number,
   "service": number,
   "discount": number,
-  "total": number
+  "total": number,
+  "calculation_steps": [
+    {"type": "discount|tax|service|adjustment", "label": string, "amount": number}
+  ]
 }
 Aturan:
 - price = total harga pada baris item itu, bukan harga satuan.
-- Jika tidak yakin, gunakan tebakan paling masuk akal.
-- Jika ada diskon/promo/voucher/pembulatan/adjustment, masukkan ke discount sebagai angka positif jika mengurangi total.
-- Pastikan total konsisten dengan subtotal + tax + service - discount.
-- Jika nilai tidak ada, isi 0.
+- Jika ada qty 2 atau lebih pada satu baris item, tetap isi qty sesuai struk.
+- discount harus angka positif pada field discount jika mengurangi total.
+- calculation_steps harus mengikuti URUTAN perhitungan yang terlihat pada nota setelah subtotal item.
+- Di calculation_steps, discount amount harus NEGATIF. Tax/service/adjustment amount harus POSITIF kecuali benar-benar mengurangi total.
+- Jika ada 'discount 30%' lalu tax 10%, maka calculation_steps harus berurutan: discount dulu baru tax.
+- Jika ada rounding/pembulatan/voucher/promo/adjustment lain, masukkan ke calculation_steps dengan type adjustment.
+- Pastikan subtotal + jumlah semua calculation_steps = total.
+- Jika nilai tidak ada, isi 0 atau [] sesuai kebutuhan.
 - Jangan tambahkan penjelasan apa pun di luar JSON.`
             },
             {
@@ -61,6 +68,9 @@ Aturan:
       if (!match) throw new Error('AI tidak mengembalikan JSON yang valid.');
       receipt = JSON.parse(match[0]);
     }
+
+    receipt.calculation_steps = Array.isArray(receipt.calculation_steps) ? receipt.calculation_steps : [];
+    receipt.discount = Math.abs(Number(receipt.discount || 0));
 
     return res.status(200).json({ receipt });
   } catch (error) {
