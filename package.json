@@ -1,15 +1,12 @@
 {
   "name": "splitbill-ai-final",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vercel dev",
-    "start": "vercel dev"
+    "dev": "vercel dev"
   },
   "dependencies": {
     "openai": "^4.104.0"
-  },
-  "devDependencies": {
-    "vercel": "^44.7.3"
   }
 }

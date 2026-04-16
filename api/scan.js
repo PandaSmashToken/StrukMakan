@@ -1,13 +1,5 @@
 import OpenAI from 'openai';
 
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '10mb',
-    },
-  },
-};
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -15,16 +7,14 @@ export default async function handler(req, res) {
 
   try {
     const { image } = req.body || {};
-    if (!image) {
-      return res.status(400).json({ error: 'Image is required' });
-    }
+    if (!image) return res.status(400).json({ error: 'Image is required' });
     if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: 'OPENAI_API_KEY is not configured' });
+      return res.status(500).json({ error: 'OPENAI_API_KEY belum diisi di Vercel Environment Variables.' });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const response = await client.responses.create({
+    const response = await openai.responses.create({
       model: 'gpt-4.1-mini',
       input: [
         {
@@ -32,20 +22,45 @@ export default async function handler(req, res) {
           content: [
             {
               type: 'input_text',
-              text: `You are extracting restaurant receipt data. Return ONLY valid JSON using this exact schema:\n{\n  "restaurant_name": "string",\n  "date": "string",\n  "items": [\n    { "name": "string", "qty": number, "price": number }\n  ],\n  "subtotal": number,\n  "tax": number,\n  "service": number,\n  "total": number\n}\nRules:\n- Detect restaurant or cafe name from the header.\n- Detect transaction date/time if visible.\n- Include only food/drink line items in items.\n- qty must default to 1 if unclear.\n- price must be final numeric value per line item.\n- subtotal, tax, service, total must be numbers, use 0 if missing.\n- Ignore cashier name, table number, payment method, change, promo, rounding, member info, and thank-you text.\n- If uncertain, still provide best-effort structured extraction.`,
+              text: `Baca foto struk restoran/kafe ini dan keluarkan JSON valid saja tanpa markdown.
+Skema wajib:
+{
+  "restaurant_name": string,
+  "date": string,
+  "items": [{"name": string, "qty": number, "price": number}],
+  "subtotal": number,
+  "tax": number,
+  "service": number,
+  "total": number
+}
+Aturan:
+- price = total harga pada baris item itu, bukan harga satuan.
+- Jika tidak yakin, gunakan tebakan paling masuk akal.
+- Jika nilai tidak ada, isi 0.
+- Jangan tambahkan penjelasan apa pun di luar JSON.`
             },
             {
               type: 'input_image',
               image_url: image,
-            },
-          ],
-        },
-      ],
+              detail: 'high'
+            }
+          ]
+        }
+      ]
     });
 
-    return res.status(200).json({ result: response.output_text });
+    const raw = response.output_text || '{}';
+    let receipt;
+    try {
+      receipt = JSON.parse(raw);
+    } catch {
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('AI tidak mengembalikan JSON yang valid.');
+      receipt = JSON.parse(match[0]);
+    }
+
+    return res.status(200).json({ receipt });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: error.message || 'Failed to scan receipt' });
+    return res.status(500).json({ error: error?.message || 'Unknown error' });
   }
 }
