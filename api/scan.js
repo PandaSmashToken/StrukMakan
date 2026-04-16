@@ -31,11 +31,14 @@ Skema wajib:
   "subtotal": number,
   "tax": number,
   "service": number,
+  "discount": number,
   "total": number
 }
 Aturan:
 - price = total harga pada baris item itu, bukan harga satuan.
 - Jika tidak yakin, gunakan tebakan paling masuk akal.
+- Jika ada diskon/promo/voucher/pembulatan/adjustment, masukkan ke discount sebagai angka positif jika mengurangi total.
+- Pastikan total konsisten dengan subtotal + tax + service - discount.
 - Jika nilai tidak ada, isi 0.
 - Jangan tambahkan penjelasan apa pun di luar JSON.`
             },

@@ -7,6 +7,7 @@ const state = {
     subtotal: 0,
     tax: 0,
     service: 0,
+    discount: 0,
     total: 0,
   },
   items: [],
@@ -24,6 +25,7 @@ const el = {
   subtotalInput: $('subtotalInput'),
   taxInput: $('taxInput'),
   serviceInput: $('serviceInput'),
+  discountInput: $('discountInput'),
   totalInput: $('totalInput'),
   personInput: $('personInput'),
   addPersonBtn: $('addPersonBtn'),
@@ -34,6 +36,7 @@ const el = {
   resultsContainer: $('resultsContainer'),
   itemsGrandTotal: $('itemsGrandTotal'),
   feesGrandTotal: $('feesGrandTotal'),
+  adjustmentGrandTotal: $('adjustmentGrandTotal'),
   grandTotal: $('grandTotal'),
   whatsappInput: $('whatsappInput'),
   whatsappMessage: $('whatsappMessage'),
@@ -152,6 +155,7 @@ async function scanReceipt() {
     state.receipt.subtotal = sanitizeNumber(data.receipt?.subtotal);
     state.receipt.tax = sanitizeNumber(data.receipt?.tax);
     state.receipt.service = sanitizeNumber(data.receipt?.service);
+    state.receipt.discount = sanitizeNumber(data.receipt?.discount);
     state.receipt.total = sanitizeNumber(data.receipt?.total);
     state.items = (data.receipt?.items || []).map((it) => normalizeItem(it));
     el.scanStatus.textContent = 'Scan selesai. Silakan cek dan edit hasilnya kalau perlu.';
@@ -195,35 +199,63 @@ function updateReceiptFieldsFromInputs() {
   state.receipt.subtotal = sanitizeNumber(el.subtotalInput.value);
   state.receipt.tax = sanitizeNumber(el.taxInput.value);
   state.receipt.service = sanitizeNumber(el.serviceInput.value);
+  state.receipt.discount = sanitizeNumber(el.discountInput.value);
   state.receipt.total = sanitizeNumber(el.totalInput.value);
   render(false);
 }
 
 function calculate() {
-  const peopleTotals = Object.fromEntries(state.people.map((p) => [p, 0]));
+  const peopleItemTotals = Object.fromEntries(state.people.map((p) => [p, 0]));
   const itemGrand = state.items.reduce((sum, item) => sum + sanitizeNumber(item.price), 0);
+
   state.items.forEach((item) => {
     const eaters = item.assignedTo || [];
     if (!eaters.length) return;
     const each = sanitizeNumber(item.price) / eaters.length;
     eaters.forEach((name) => {
-      if (!(name in peopleTotals)) peopleTotals[name] = 0;
-      peopleTotals[name] += each;
+      if (!(name in peopleItemTotals)) peopleItemTotals[name] = 0;
+      peopleItemTotals[name] += each;
     });
   });
+
   const fees = sanitizeNumber(state.receipt.tax) + sanitizeNumber(state.receipt.service);
   const feeEach = state.people.length ? fees / state.people.length : 0;
-  const rows = state.people.map((name) => ({
-    name,
-    itemsOnly: peopleTotals[name] || 0,
-    fees: feeEach,
-    total: (peopleTotals[name] || 0) + feeEach,
-  }));
+
+  const explicitDiscount = sanitizeNumber(state.receipt.discount);
+  const derivedAdjustment = sanitizeNumber(state.receipt.total) - (itemGrand + fees - explicitDiscount);
+  const totalDiscountOrAdjustment = explicitDiscount - derivedAdjustment;
+
+  const totalAssignedItems = Object.values(peopleItemTotals).reduce((a, b) => a + b, 0);
+
+  const rows = state.people.map((name) => {
+    const itemsOnly = peopleItemTotals[name] || 0;
+    const discountShare = totalAssignedItems > 0
+      ? (itemsOnly / totalAssignedItems) * totalDiscountOrAdjustment
+      : (state.people.length ? totalDiscountOrAdjustment / state.people.length : 0);
+    const total = itemsOnly + feeEach - discountShare;
+    return {
+      name,
+      itemsOnly,
+      fees: feeEach,
+      adjustment: -discountShare,
+      total,
+    };
+  });
+
+  const computedGrand = rows.reduce((sum, row) => sum + row.total, 0);
+  const targetGrand = sanitizeNumber(state.receipt.total) || (itemGrand + fees - explicitDiscount);
+  const reconciliation = targetGrand - computedGrand;
+  if (rows.length && Math.abs(reconciliation) > 0.0001) {
+    rows[rows.length - 1].total += reconciliation;
+    rows[rows.length - 1].adjustment += reconciliation;
+  }
+
   return {
     rows,
     itemGrand,
     fees,
-    grand: itemGrand + fees,
+    adjustment: totalDiscountOrAdjustment * -1,
+    grand: targetGrand,
   };
 }
 
@@ -238,6 +270,7 @@ function buildWhatsappMessage(calc) {
   lines.push('');
   lines.push(`Total item: ${formatRp(calc.itemGrand)}`);
   lines.push(`Pajak + service: ${formatRp(calc.fees)}`);
+  if (calc.adjustment) lines.push(`Diskon / penyesuaian: ${formatRp(calc.adjustment)}`);
   lines.push(`Grand total: ${formatRp(calc.grand)}`);
   return lines.join('\n');
 }
@@ -249,6 +282,7 @@ function render(syncInputs = true) {
     el.subtotalInput.value = sanitizeNumber(state.receipt.subtotal);
     el.taxInput.value = sanitizeNumber(state.receipt.tax);
     el.serviceInput.value = sanitizeNumber(state.receipt.service);
+    el.discountInput.value = sanitizeNumber(state.receipt.discount);
     el.totalInput.value = sanitizeNumber(state.receipt.total);
   }
 
@@ -298,12 +332,13 @@ function render(syncInputs = true) {
   el.resultsContainer.innerHTML = calc.rows.map((row) => `
     <div class="result-card">
       <strong>${escapeHtml(row.name)}</strong>
-      <div class="muted">Menu ${formatRp(row.itemsOnly)} + fee ${formatRp(row.fees)}</div>
+      <div class="muted">Menu ${formatRp(row.itemsOnly)} + fee ${formatRp(row.fees)}${row.adjustment ? ` + adj ${formatRp(row.adjustment)}` : ''}</div>
       <div style="font-size:20px; font-weight:800; margin-top:6px;">${formatRp(row.total)}</div>
     </div>
   `).join('');
   el.itemsGrandTotal.textContent = formatRp(calc.itemGrand);
   el.feesGrandTotal.textContent = formatRp(calc.fees);
+  el.adjustmentGrandTotal.textContent = formatRp(calc.adjustment);
   el.grandTotal.textContent = formatRp(calc.grand);
 
   const message = buildWhatsappMessage(calc);
@@ -334,7 +369,7 @@ function bindEvents() {
   el.addItemBtn.addEventListener('click', addManualItem);
   el.splitAllQtyBtn.addEventListener('click', splitAllQtyItems);
 
-  [el.merchantInput, el.dateInput, el.subtotalInput, el.taxInput, el.serviceInput, el.totalInput].forEach((node) => {
+  [el.merchantInput, el.dateInput, el.subtotalInput, el.taxInput, el.serviceInput, el.discountInput, el.totalInput].forEach((node) => {
     node.addEventListener('input', updateReceiptFieldsFromInputs);
   });
 
