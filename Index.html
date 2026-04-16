@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>SplitStruk</title>
+
+<link rel="stylesheet" href="style.css">
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+
+<link rel="manifest" href="manifest.json">
+
+</head>
+
+<body>
+
+<h1>SplitStruk</h1>
+
+<h3>Foto Struk</h3>
+
+<input type="file" id="receipt" accept="image/*" capture="environment">
+
+<button onclick="scan()">Scan Struk</button>
+
+<p id="status"></p>
+
+<h3>Nama Orang</h3>
+
+<input id="people" placeholder="Danny,Sendy,Budi">
+
+<button onclick="setPeople()">Set</button>
+
+<h3>Menu</h3>
+
+<table id="menu">
+
+<tr>
+<th>Menu</th>
+<th>Harga</th>
+<th>Untuk</th>
+</tr>
+
+</table>
+
+<button onclick="calculate()">Hitung</button>
+
+<h3>Hasil</h3>
+
+<div id="result"></div>
+
+<button onclick="share()">Share WhatsApp</button>
+
+<script src="app.js"></script>
+
+</body>
+</html>
