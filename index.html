@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SplitBill AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">AI Receipt Split Bill</div>
+        <h1>SplitBill AI</h1>
+        <p>Upload struk, scan dengan AI, edit hasilnya, lalu bagi tagihan per orang dan share ke WhatsApp.</p>
+      </div>
+      <button id="themeToggle" class="ghost-btn" type="button">🌙 Dark</button>
+    </header>
+
+    <main class="grid">
+      <section class="card span-2">
+        <h2>1. Upload / Foto Struk</h2>
+        <div class="row wrap">
+          <input id="fileInput" type="file" accept="image/*" hidden>
+          <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
+          <button class="primary-btn" id="cameraBtn" type="button">📷 Ambil dari Kamera</button>
+          <button class="secondary-btn" id="uploadBtn" type="button">🖼️ Import Foto</button>
+          <button class="primary-btn" id="scanBtn" type="button">✨ Scan AI</button>
+        </div>
+        <div id="previewWrap" class="preview-wrap empty">Belum ada gambar struk</div>
+        <div id="scanStatus" class="status"></div>
+      </section>
+
+      <section class="card">
+        <h2>2. Info Struk</h2>
+        <label>Nama Resto/Cafe<input id="restaurantName" type="text" placeholder="Contoh: Soto Pak Kumis"></label>
+        <label>Tanggal Transaksi<input id="transactionDate" type="text" placeholder="Contoh: 16/04/2026 19:22"></label>
+        <div class="totals-grid">
+          <label>Subtotal<input id="subtotal" type="number" min="0" value="0"></label>
+          <label>Pajak<input id="tax" type="number" min="0" value="0"></label>
+          <label>Service<input id="service" type="number" min="0" value="0"></label>
+          <label>Total<input id="total" type="number" min="0" value="0"></label>
+        </div>
+      </section>
+
+      <section class="card span-2">
+        <div class="row between center">
+          <h2>3. Item Menu</h2>
+          <button class="secondary-btn" id="addItemBtn" type="button">＋ Tambah Item</button>
+        </div>
+        <div id="itemsContainer" class="items-container"></div>
+      </section>
+
+      <section class="card">
+        <h2>4. Nama Orang</h2>
+        <div class="row">
+          <input id="personInput" type="text" placeholder="Tambah nama">
+          <button class="primary-btn" id="addPersonBtn" type="button">Tambah</button>
+        </div>
+        <div id="peopleContainer" class="people-wrap"></div>
+      </section>
+
+      <section class="card span-2">
+        <div class="row between center">
+          <h2>5. Hasil Split Bill</h2>
+          <button class="primary-btn" id="recalculateBtn" type="button">🧮 Hitung Ulang</button>
+        </div>
+        <div id="resultsContainer" class="results"></div>
+      </section>
+
+      <section class="card">
+        <h2>6. Export & Share</h2>
+        <label>No. WhatsApp Tujuan (opsional)<input id="waNumber" type="text" placeholder="6281234567890"></label>
+        <div class="row wrap">
+          <button class="secondary-btn" id="copyBtn" type="button">📋 Copy Ringkasan</button>
+          <button class="secondary-btn" id="shareBtn" type="button">💬 Share WhatsApp</button>
+          <button class="primary-btn" id="exportBtn" type="button">🖼️ Export PNG</button>
+        </div>
+        <textarea id="summaryText" rows="12" readonly></textarea>
+      </section>
+    </main>
+  </div>
+
+  <section id="billCard" class="bill-card" aria-hidden="true">
+    <div class="bill-header">
+      <div>
+        <div class="bill-brand">SplitBill AI</div>
+        <h3 id="billRestaurant">-</h3>
+        <div id="billDate" class="muted">-</div>
+      </div>
+      <div class="bill-pill">Split Summary</div>
+    </div>
+    <div id="billList" class="bill-list"></div>
+    <div class="bill-footer">
+      <div><span>Subtotal</span><strong id="billSubtotal">Rp0</strong></div>
+      <div><span>Pajak</span><strong id="billTax">Rp0</strong></div>
+      <div><span>Service</span><strong id="billService">Rp0</strong></div>
+      <div class="grand"><span>Total</span><strong id="billTotal">Rp0</strong></div>
+    </div>
+  </section>
+
+  <script src="./app.js"></script>
+</body>
+</html>
