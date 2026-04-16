@@ -67,15 +67,22 @@ parse(text)
 
 function parse(text){
 
-let lines=text.split("\n")
+let lines = text.split("\n")
 
-lines.forEach(l=>{
+lines.forEach(line => {
 
-let m=l.match(/(.+?)\s(\d{3,})$/)
+line = line.trim()
 
-if(m){
+// cocokkan harga seperti 18.000 atau 18000
+let match = line.match(/(.+?)\s+([\d\.]{3,})$/)
 
-addItem(m[1],m[2])
+if(match){
+
+let name = match[1].trim()
+
+let price = match[2].replace(/\./g,'')
+
+addItem(name, price)
 
 }
 
