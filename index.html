@@ -1,59 +1,553 @@
-<!DOCTYPE html>
-<html>
+import React, { useMemo, useRef, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Camera, Upload, ScanText, Users, Calculator, MessageCircle, Plus, Trash2, Loader2, Copy } from "lucide-react";
+import { motion } from "framer-motion";
+import Tesseract from "tesseract.js";
 
-<head>
+function formatRupiah(value) {
+  const number = Number(value || 0);
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(number);
+}
 
-<meta name="viewport" content="width=device-width, initial-scale=1">
+function normalizePrice(raw) {
+  if (!raw) return 0;
+  let cleaned = String(raw).replace(/[^\d.,]/g, "");
+  if (!cleaned) return 0;
 
-<title>SplitStruk</title>
+  // Handle common receipt formats: 12.000, 12000, 12,000
+  if (cleaned.includes(".") && cleaned.includes(",")) {
+    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+  } else {
+    const commaCount = (cleaned.match(/,/g) || []).length;
+    const dotCount = (cleaned.match(/\./g) || []).length;
+    if (commaCount > 0 && dotCount === 0) {
+      const parts = cleaned.split(",");
+      if (parts[parts.length - 1]?.length === 3) {
+        cleaned = parts.join("");
+      } else {
+        cleaned = cleaned.replace(",", ".");
+      }
+    }
+    if (dotCount > 0 && commaCount === 0) {
+      const parts = cleaned.split(".");
+      if (parts[parts.length - 1]?.length === 3) {
+        cleaned = parts.join("");
+      }
+    }
+  }
 
-<link rel="stylesheet" href="style.css">
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : 0;
+}
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+function extractReceiptItems(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 
-<link rel="manifest" href="manifest.json">
+  const blockedKeywords = [
+    "subtotal",
+    "total",
+    "tax",
+    "ppn",
+    "service",
+    "change",
+    "cash",
+    "debit",
+    "credit",
+    "promo",
+    "diskon",
+    "discount",
+    "amount",
+    "bill",
+    "rekening",
+    "table",
+    "no.",
+    "date",
+    "jam",
+    "waktu",
+    "terima kasih",
+    "thank you",
+  ];
 
-</head>
+  const results = [];
 
-<body>
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    if (blockedKeywords.some((kw) => lower.includes(kw))) continue;
 
-<h1>SplitStruk</h1>
+    // Pattern examples:
+    // ESTEH 12000
+    // SOTO AYAM 18.000
+    // 2 NASI GORENG 25.000
+    // NASI GORENG x2 25000
+    const match = line.match(/^(.*?)(?:\s+|\t)(\d{1,3}(?:[.,]\d{3})+|\d{3,})(?:\s*)$/);
+    if (!match) continue;
 
-<h3>Foto Struk</h3>
+    let namePart = match[1].trim();
+    const pricePart = match[2].trim();
 
-<input type="file" id="receipt" accept="image/*" capture="environment">
+    if (!namePart || namePart.length < 2) continue;
 
-<button onclick="scan()">Scan Struk</button>
+    let qty = 1;
+    const qtyPrefix = namePart.match(/^(\d+)\s+(.+)$/i);
+    if (qtyPrefix) {
+      qty = Number(qtyPrefix[1]) || 1;
+      namePart = qtyPrefix[2].trim();
+    }
 
-<p id="status"></p>
+    const qtySuffix = namePart.match(/^(.+?)\s*[xX]\s*(\d+)$/);
+    if (qtySuffix) {
+      namePart = qtySuffix[1].trim();
+      qty = Number(qtySuffix[2]) || qty;
+    }
 
-<h3>Nama Orang</h3>
+    const price = normalizePrice(pricePart);
+    if (!price) continue;
 
-<input id="people" placeholder="Danny,Sendy,Budi">
+    results.push({
+      id: crypto.randomUUID(),
+      name: namePart,
+      qty,
+      price,
+      assignedTo: "unassigned",
+    });
+  }
 
-<button onclick="setPeople()">Set</button>
+  return results;
+}
 
-<h3>Menu</h3>
+function App() {
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState("");
+  const [ocrText, setOcrText] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [items, setItems] = useState([]);
+  const [newPerson, setNewPerson] = useState("");
+  const [people, setPeople] = useState(["Danny", "Debbie", "Makan Tengah"]);
+  const [sharedTax, setSharedTax] = useState(0);
+  const [sharedService, setSharedService] = useState(0);
+  const [sharedOther, setSharedOther] = useState(0);
+  const [whatsAppTarget, setWhatsAppTarget] = useState("");
+  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
 
-<table id="menu">
+  const grandItemsTotal = useMemo(() => items.reduce((sum, item) => sum + Number(item.price || 0), 0), [items]);
+  const sharedTotal = Number(sharedTax || 0) + Number(sharedService || 0) + Number(sharedOther || 0);
 
-<tr>
-<th>Menu</th>
-<th>Harga</th>
-<th>Untuk</th>
-</tr>
+  const calculations = useMemo(() => {
+    const activePeople = people.filter(Boolean);
+    const personMap = Object.fromEntries(activePeople.map((p) => [p, 0]));
 
-</table>
+    items.forEach((item) => {
+      if (!item.assignedTo || item.assignedTo === "unassigned") return;
+      const value = Number(item.price || 0);
+      if (!personMap[item.assignedTo]) personMap[item.assignedTo] = 0;
+      personMap[item.assignedTo] += value;
+    });
 
-<button onclick="calculate()">Hitung</button>
+    const sharePerPerson = activePeople.length ? sharedTotal / activePeople.length : 0;
+    const result = activePeople.map((person) => ({
+      name: person,
+      itemsTotal: personMap[person] || 0,
+      sharedFee: sharePerPerson,
+      total: (personMap[person] || 0) + sharePerPerson,
+    }));
 
-<h3>Hasil</h3>
+    const assignedSum = result.reduce((sum, row) => sum + row.total, 0);
 
-<div id="result"></div>
+    return {
+      rows: result,
+      sharePerPerson,
+      assignedSum,
+    };
+  }, [items, people, sharedTotal]);
 
-<button onclick="share()">Share WhatsApp</button>
+  const unassignedCount = items.filter((item) => item.assignedTo === "unassigned").length;
 
-<script src="app.js"></script>
+  const handleFile = (file) => {
+    if (!file) return;
+    setImageFile(file);
+    const url = URL.createObjectURL(file);
+    setImagePreview(url);
+  };
 
-</body>
-</html>
+  const handleScan = async () => {
+    if (!imageFile) return;
+    setIsScanning(true);
+    setScanProgress(0);
+
+    try {
+      const result = await Tesseract.recognize(imageFile, "eng", {
+        logger: (m) => {
+          if (m.status === "recognizing text") {
+            setScanProgress(Math.round((m.progress || 0) * 100));
+          }
+        },
+      });
+      const text = result.data.text || "";
+      setOcrText(text);
+      const extracted = extractReceiptItems(text);
+      setItems(extracted);
+    } catch (error) {
+      console.error(error);
+      alert("Gagal membaca struk. Coba foto yang lebih terang dan lurus.");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleParseManualText = () => {
+    const extracted = extractReceiptItems(ocrText);
+    setItems(extracted);
+  };
+
+  const addPerson = () => {
+    const name = newPerson.trim();
+    if (!name) return;
+    if (people.includes(name)) return;
+    setPeople((prev) => [...prev, name]);
+    setNewPerson("");
+  };
+
+  const removePerson = (name) => {
+    setPeople((prev) => prev.filter((p) => p !== name));
+    setItems((prev) =>
+      prev.map((item) => (item.assignedTo === name ? { ...item, assignedTo: "unassigned" } : item))
+    );
+  };
+
+  const updateItem = (id, patch) => {
+    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  };
+
+  const addManualItem = () => {
+    setItems((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        name: "Menu baru",
+        qty: 1,
+        price: 0,
+        assignedTo: "unassigned",
+      },
+    ]);
+  };
+
+  const deleteItem = (id) => {
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const whatsappMessage = useMemo(() => {
+    const lines = [
+      "*Split Bill Result*",
+      "",
+      ...calculations.rows.map(
+        (row) =>
+          `• ${row.name}: ${formatRupiah(row.total)} (menu ${formatRupiah(row.itemsTotal)} + shared ${formatRupiah(row.sharedFee)})`
+      ),
+      "",
+      `Total menu: ${formatRupiah(grandItemsTotal)}`,
+      `Biaya bersama: ${formatRupiah(sharedTotal)}`,
+      `Grand total: ${formatRupiah(grandItemsTotal + sharedTotal)}`,
+    ];
+    return lines.join("\n");
+  }, [calculations.rows, grandItemsTotal, sharedTotal]);
+
+  const whatsappHref = useMemo(() => {
+    const target = whatsAppTarget.replace(/[^\d]/g, "");
+    const encoded = encodeURIComponent(whatsappMessage);
+    return target ? `https://wa.me/${target}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+  }, [whatsAppTarget, whatsappMessage]);
+
+  const copySummary = async () => {
+    try {
+      await navigator.clipboard.writeText(whatsappMessage);
+      alert("Ringkasan berhasil disalin.");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
+          <Card className="rounded-3xl border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-3xl font-bold tracking-tight">Receipt Split Bill</CardTitle>
+              <CardDescription className="text-base">
+                Upload atau foto struk, baca item otomatis, assign ke orang, lalu share hasilnya ke WhatsApp.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </motion.div>
+
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="space-y-6 lg:col-span-2">
+            <Card className="rounded-3xl border-0 shadow-md">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl"><Camera className="h-5 w-5" /> 1. Foto / Import Struk</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-3">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleFile(e.target.files?.[0])}
+                  />
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(e) => handleFile(e.target.files?.[0])}
+                  />
+                  <Button className="rounded-2xl" onClick={() => cameraInputRef.current?.click()}>
+                    <Camera className="mr-2 h-4 w-4" /> Ambil dari Kamera
+                  </Button>
+                  <Button variant="outline" className="rounded-2xl" onClick={() => fileInputRef.current?.click()}>
+                    <Upload className="mr-2 h-4 w-4" /> Import Foto
+                  </Button>
+                  <Button className="rounded-2xl" onClick={handleScan} disabled={!imageFile || isScanning}>
+                    {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ScanText className="mr-2 h-4 w-4" />}
+                    {isScanning ? `Scanning ${scanProgress}%` : "Proses OCR"}
+                  </Button>
+                </div>
+
+                {imagePreview ? (
+                  <div className="overflow-hidden rounded-3xl border bg-white p-3">
+                    <img src={imagePreview} alt="Receipt preview" className="max-h-[420px] w-full rounded-2xl object-contain" />
+                  </div>
+                ) : (
+                  <div className="rounded-3xl border border-dashed bg-white p-10 text-center text-sm text-slate-500">
+                    Belum ada foto struk.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-0 shadow-md">
+              <CardHeader>
+                <CardTitle className="text-xl">2. Hasil Pembacaan Struk</CardTitle>
+                <CardDescription>
+                  Sistem mencoba membaca nama menu dan harga otomatis. Kalau ada yang keliru, bisa diedit manual.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Tabs defaultValue="items" className="w-full">
+                  <TabsList className="grid w-full grid-cols-2 rounded-2xl">
+                    <TabsTrigger value="items">Item Terdeteksi</TabsTrigger>
+                    <TabsTrigger value="raw">Teks OCR</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="items" className="mt-4 space-y-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="secondary">{items.length} item</Badge>
+                      <Badge variant={unassignedCount ? "destructive" : "secondary"}>{unassignedCount} belum di-assign</Badge>
+                      <Button variant="outline" className="rounded-2xl" onClick={addManualItem}>
+                        <Plus className="mr-2 h-4 w-4" /> Tambah Item Manual
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {items.map((item) => (
+                        <div key={item.id} className="grid gap-3 rounded-2xl border bg-white p-4 md:grid-cols-12">
+                          <div className="md:col-span-4">
+                            <Label>Menu</Label>
+                            <Input value={item.name} onChange={(e) => updateItem(item.id, { name: e.target.value })} className="mt-1 rounded-xl" />
+                          </div>
+                          <div className="md:col-span-2">
+                            <Label>Qty</Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={item.qty}
+                              onChange={(e) => updateItem(item.id, { qty: Number(e.target.value || 1) })}
+                              className="mt-1 rounded-xl"
+                            />
+                          </div>
+                          <div className="md:col-span-2">
+                            <Label>Harga</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              value={item.price}
+                              onChange={(e) => updateItem(item.id, { price: Number(e.target.value || 0) })}
+                              className="mt-1 rounded-xl"
+                            />
+                          </div>
+                          <div className="md:col-span-3">
+                            <Label>Dimakan oleh</Label>
+                            <Select value={item.assignedTo} onValueChange={(value) => updateItem(item.id, { assignedTo: value })}>
+                              <SelectTrigger className="mt-1 rounded-xl">
+                                <SelectValue placeholder="Pilih nama" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unassigned">Belum di-assign</SelectItem>
+                                {people.map((person) => (
+                                  <SelectItem key={person} value={person}>{person}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="flex items-end md:col-span-1">
+                            <Button variant="ghost" className="w-full rounded-xl" onClick={() => deleteItem(item.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+
+                      {!items.length && (
+                        <div className="rounded-2xl border border-dashed bg-white p-8 text-center text-sm text-slate-500">
+                          Belum ada item. Jalankan OCR atau tambah item manual.
+                        </div>
+                      )}
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="raw" className="mt-4 space-y-4">
+                    <Textarea
+                      value={ocrText}
+                      onChange={(e) => setOcrText(e.target.value)}
+                      rows={14}
+                      className="rounded-2xl"
+                      placeholder="Teks hasil OCR akan muncul di sini..."
+                    />
+                    <Button className="rounded-2xl" onClick={handleParseManualText}>Parse Ulang dari Teks</Button>
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            <Card className="rounded-3xl border-0 shadow-md">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl"><Users className="h-5 w-5" /> 3. Daftar Nama</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Tambah nama"
+                    value={newPerson}
+                    onChange={(e) => setNewPerson(e.target.value)}
+                    className="rounded-2xl"
+                  />
+                  <Button className="rounded-2xl" onClick={addPerson}><Plus className="h-4 w-4" /></Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {people.map((person) => (
+                    <div key={person} className="flex items-center gap-2 rounded-2xl bg-white px-3 py-2 shadow-sm">
+                      <span className="text-sm font-medium">{person}</span>
+                      <button onClick={() => removePerson(person)} className="text-slate-400 hover:text-red-500">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-0 shadow-md">
+              <CardHeader>
+                <CardTitle className="text-xl">Biaya Bersama</CardTitle>
+                <CardDescription>Pajak, service, atau biaya lain dibagi rata ke semua nama.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label>Pajak / PPN</Label>
+                  <Input type="number" min="0" value={sharedTax} onChange={(e) => setSharedTax(Number(e.target.value || 0))} className="mt-1 rounded-2xl" />
+                </div>
+                <div>
+                  <Label>Service</Label>
+                  <Input type="number" min="0" value={sharedService} onChange={(e) => setSharedService(Number(e.target.value || 0))} className="mt-1 rounded-2xl" />
+                </div>
+                <div>
+                  <Label>Biaya Lain</Label>
+                  <Input type="number" min="0" value={sharedOther} onChange={(e) => setSharedOther(Number(e.target.value || 0))} className="mt-1 rounded-2xl" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-0 shadow-md">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl"><Calculator className="h-5 w-5" /> 4. Hasil Hitung</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3 rounded-2xl bg-white p-4">
+                  {calculations.rows.map((row) => (
+                    <div key={row.name} className="rounded-2xl border p-3">
+                      <div className="text-sm text-slate-500">{row.name}</div>
+                      <div className="text-lg font-semibold">{formatRupiah(row.total)}</div>
+                      <div className="text-xs text-slate-500">
+                        Menu {formatRupiah(row.itemsTotal)} + Shared {formatRupiah(row.sharedFee)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <Separator />
+
+                <div className="space-y-1 text-sm">
+                  <div className="flex items-center justify-between"><span>Total menu</span><span>{formatRupiah(grandItemsTotal)}</span></div>
+                  <div className="flex items-center justify-between"><span>Biaya bersama</span><span>{formatRupiah(sharedTotal)}</span></div>
+                  <div className="flex items-center justify-between font-semibold"><span>Grand total</span><span>{formatRupiah(grandItemsTotal + sharedTotal)}</span></div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-0 shadow-md">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl"><MessageCircle className="h-5 w-5" /> 5. Share WhatsApp</CardTitle>
+                <CardDescription>Isi nomor tujuan opsional. Kosongkan jika ingin pilih chat manual di WhatsApp.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label>No. WhatsApp</Label>
+                  <Input
+                    placeholder="6281234567890"
+                    value={whatsAppTarget}
+                    onChange={(e) => setWhatsAppTarget(e.target.value)}
+                    className="mt-1 rounded-2xl"
+                  />
+                </div>
+                <Textarea value={whatsappMessage} readOnly rows={10} className="rounded-2xl" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Button variant="outline" className="rounded-2xl" onClick={copySummary}>
+                    <Copy className="mr-2 h-4 w-4" /> Copy
+                  </Button>
+                  <a href={whatsappHref} target="_blank" rel="noreferrer" className="w-full">
+                    <Button className="w-full rounded-2xl">
+                      <MessageCircle className="mr-2 h-4 w-4" /> Share WhatsApp
+                    </Button>
+                  </a>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;
