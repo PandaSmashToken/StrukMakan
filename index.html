@@ -3,164 +3,36 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SplitBill AI</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <title>SplitBill SaaS</title>
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <div class="page">
-    <header class="hero card">
-      <div>
-        <div class="eyebrow">AI Receipt Splitter</div>
-        <h1>SplitBill AI</h1>
-        <p>Upload struk, scan dengan AI, edit hasilnya, bagi item ke satu orang atau ramai-ramai, lalu share hasil tagihan ke WhatsApp.</p>
-      </div>
-      <div class="hero-actions">
-        <button id="themeToggle" class="btn btn-secondary">🌙 Dark mode</button>
+  <div class="container">
+    <header>
+      <h1>SplitBill SaaS</h1>
+      <div class="actions">
+        <button id="loginBtn">Login Google</button>
+        <button id="logoutBtn" class="secondary">Logout</button>
       </div>
     </header>
 
-    <section class="grid top-grid">
-      <div class="card">
-        <h2>1. Upload Struk</h2>
-        <div class="upload-row">
-          <label class="btn btn-primary file-btn">
-            <input id="fileInput" type="file" accept="image/*" />
-            Import Foto
-          </label>
-          <label class="btn btn-secondary file-btn">
-            <input id="cameraInput" type="file" accept="image/*" capture="environment" />
-            Kamera
-          </label>
-          <button id="scanBtn" class="btn btn-primary">Scan AI</button>
-        </div>
-        <div id="scanStatus" class="status muted">Belum ada file.</div>
-        <div class="preview-wrap">
-          <img id="previewImage" alt="Preview struk" />
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>2. Detail Struk</h2>
-        <div class="form-grid">
-          <div>
-            <label>Nama resto / cafe</label>
-            <input id="merchantInput" type="text" placeholder="Contoh: Depot Suka Makan" />
-          </div>
-          <div>
-            <label>Tanggal transaksi</label>
-            <input id="dateInput" type="text" placeholder="Contoh: 2026-04-16 19:35" />
-          </div>
-          <div>
-            <label>Subtotal</label>
-            <input id="subtotalInput" type="number" min="0" step="1" />
-          </div>
-          <div>
-            <label>Pajak</label>
-            <input id="taxInput" type="number" min="0" step="1" />
-          </div>
-          <div>
-            <label>Service</label>
-            <input id="serviceInput" type="number" min="0" step="1" />
-          </div>
-          <div>
-            <label>Diskon</label>
-            <input id="discountInput" type="number" min="0" step="1" />
-          </div>
-          <div>
-            <label>Total</label>
-            <input id="totalInput" type="number" min="0" step="1" />
-          </div>
-          <div style="grid-column: 1 / -1;">
-            <label>Urutan hitung nota</label>
-            <select id="calculationModeSelect">
-              <option value="ai_steps">Ikuti hasil baca AI dari nota</option>
-              <option value="subtotal_discount_tax_service">Subtotal → Discount → Tax → Service</option>
-              <option value="subtotal_discount_service_tax">Subtotal → Discount → Service → Tax</option>
-              <option value="subtotal_tax_service_discount">Subtotal → Tax → Service → Discount</option>
-              <option value="subtotal_tax_discount_service">Subtotal → Tax → Discount → Service</option>
-              <option value="subtotal_service_discount_tax">Subtotal → Service → Discount → Tax</option>
-              <option value="subtotal_service_tax_discount">Subtotal → Service → Tax → Discount</option>
-            </select>
-            <div id="calcStepsHint" class="help" style="margin-top:8px;"></div>
-          </div>
-        </div>
-      </div>
+    <section class="card">
+      <h2>Status Akun</h2>
+      <div id="status">Belum login</div>
+      <div id="quota">Kuota: -</div>
+      <div id="device">Device: -</div>
     </section>
 
-    <section class="grid main-grid">
-      <div class="card wide-card">
-        <div class="section-title-row">
-          <h2>3. Item Menu</h2>
-          <div class="row-actions">
-            <button id="addItemBtn" class="btn btn-secondary">+ Tambah Item</button>
-            <button id="splitAllQtyBtn" class="btn btn-secondary">Pisahkan Semua Qty &gt; 1</button>
-          </div>
-        </div>
-        <div class="help">Item bisa dimakan oleh banyak orang. Jika qty lebih dari 1, bisa dipisah jadi beberapa baris agar pembagiannya lebih fleksibel.</div>
-        <div id="itemsContainer" class="items-list"></div>
-      </div>
-
-      <div class="card side-card">
-        <h2>4. Nama Orang</h2>
-        <div class="add-person-row">
-          <input id="personInput" type="text" placeholder="Tambah nama" />
-          <button id="addPersonBtn" class="btn btn-primary">Tambah</button>
-        </div>
-        <div id="peopleChips" class="chips"></div>
-
-        <hr />
-
-        <h2>5. Hasil Hitung</h2>
-        <div class="help">Urutan hitung akan mengikuti nota. Discount, tax, dan service dibagikan proporsional sesuai langkah perhitungan yang dipilih atau dibaca AI dari struk.</div>
-        <div id="resultsContainer" class="results"></div>
-
-        <div class="totals-box">
-          <div><span>Total item</span><strong id="itemsGrandTotal">Rp0</strong></div>
-          <div><span>Pajak + service</span><strong id="feesGrandTotal">Rp0</strong></div>
-          <div><span>Diskon / penyesuaian</span><strong id="adjustmentGrandTotal">Rp0</strong></div>
-          <div class="grand-line"><span>Grand total</span><strong id="grandTotal">Rp0</strong></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="grid bottom-grid">
-      <div class="card">
-        <h2>6. Share WhatsApp</h2>
-        <label>No WhatsApp tujuan (opsional)</label>
-        <input id="whatsappInput" type="text" placeholder="6281234567890" />
-        <label>Pesan</label>
-        <textarea id="whatsappMessage" rows="10"></textarea>
-        <div class="row-actions">
-          <button id="copyMessageBtn" class="btn btn-secondary">Copy</button>
-          <button id="shareWaBtn" class="btn btn-primary">Share WhatsApp</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="section-title-row">
-          <h2>7. Export Gambar Tagihan</h2>
-          <button id="exportPngBtn" class="btn btn-primary">Export PNG</button>
-        </div>
-        <div id="exportCard" class="bill-card-export">
-          <div class="bill-head">
-            <div>
-              <div class="eyebrow">Split Bill</div>
-              <h3 id="exportMerchant">-</h3>
-              <div id="exportDate" class="muted">-</div>
-            </div>
-            <div class="badge">AI</div>
-          </div>
-          <div id="exportResults"></div>
-          <div class="export-total-row"><span>Total</span><strong id="exportGrandTotal">Rp0</strong></div>
-        </div>
-      </div>
+    <section class="card">
+      <h2>Setup</h2>
+      <ol>
+        <li>Isi environment variable Supabase di Vercel.</li>
+        <li>Aktifkan Google provider di Supabase.</li>
+        <li>Jalankan <code>supabase/schema.sql</code> di SQL Editor.</li>
+      </ol>
     </section>
   </div>
-
-  <script src="app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./app.js"></script>
 </body>
 </html>

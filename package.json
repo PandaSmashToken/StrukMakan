@@ -1,12 +1,8 @@
 {
-  "name": "splitbill-ai-final",
-  "version": "1.0.0",
+  "name": "splitbill-saas",
   "private": true,
   "type": "module",
-  "scripts": {
-    "dev": "vercel dev"
-  },
   "dependencies": {
-    "openai": "^4.104.0"
+    "@supabase/supabase-js": "^2.49.1"
   }
 }
